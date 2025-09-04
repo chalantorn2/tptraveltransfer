@@ -1,35 +1,41 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+// src/App.jsx - Router Only
+import { useState } from "react";
+import MainLayout from "./components/layout/MainLayout";
+import DashboardPage from "./components/pages/DashboardPage";
+import JobManagementPage from "./components/pages/JobManagementPage";
+import DriverManagementPage from "./components/pages/DriverManagementPage";
+import FreelanceJobsPage from "./components/pages/FreelanceJobsPage";
+import BookingOverviewPage from "./components/pages/BookingOverviewPage";
+import UserManagementPage from "./components/pages/UserManagementPage";
+import "./App.css";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [currentPage, setCurrentPage] = useState("dashboard");
+
+  const renderCurrentPage = () => {
+    switch (currentPage) {
+      case "dashboard":
+        return <DashboardPage />;
+      case "jobs":
+        return <JobManagementPage />;
+      case "drivers":
+        return <DriverManagementPage />;
+      case "freelance":
+        return <FreelanceJobsPage />;
+      case "booking":
+        return <BookingOverviewPage />;
+      case "usermanagement":
+        return <UserManagementPage />;
+      default:
+        return <DashboardPage />;
+    }
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <MainLayout currentPage={currentPage} setCurrentPage={setCurrentPage}>
+      {renderCurrentPage()}
+    </MainLayout>
+  );
 }
 
-export default App
+export default App;
