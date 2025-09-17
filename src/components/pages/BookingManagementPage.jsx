@@ -1,11 +1,11 @@
-// src/components/pages/JobManagementPage.jsx
-function JobManagementPage() {
+// src/components/pages/BookingManagementPage.jsx
+function BookingManagementPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Job Management
+            Booking Management
           </h1>
           <p className="text-gray-600 mt-1">
             จัดการงานทั้งหมดและมอบหมายให้คนขับ
@@ -18,7 +18,9 @@ function JobManagementPage() {
           <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <i className="fas fa-tools text-2xl text-gray-400"></i>
           </div>
-          <p className="text-gray-600 font-medium">กำลังพัฒนา Job Management</p>
+          <p className="text-gray-600 font-medium">
+            กำลังพัฒนา Booking Management
+          </p>
           <p className="text-sm text-gray-400 mt-1">
             ฟีเจอร์นี้จะพร้อมใช้งานในเร็วๆ นี้
           </p>
@@ -28,4 +30,4 @@ function JobManagementPage() {
   );
 }
 
-export default JobManagementPage;
+export default BookingManagementPage;

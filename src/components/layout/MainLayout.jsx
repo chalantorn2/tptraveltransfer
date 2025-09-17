@@ -3,15 +3,11 @@ import { COMPANY_NAME, getCompanyClass } from "../../config/company";
 
 const MENU_ITEMS = [
   { id: "dashboard", name: "Dashboard", icon: "fas fa-chart-line" },
-  { id: "jobs", name: "Job Management", icon: "fas fa-tasks" },
+  { id: "jobs", name: "Booking Management", icon: "fas fa-tasks" }, // ← เปลี่ยนแล้ว
   { id: "drivers", name: "Driver Management", icon: "fas fa-car-side" },
   { id: "freelance", name: "Freelance Jobs", icon: "fas fa-car" },
   { id: "booking", name: "Booking Overview", icon: "fas fa-calendar-days" },
-  {
-    id: "usermanagement",
-    name: "User Management",
-    icon: "fas fas fa-users",
-  },
+  { id: "usermanagement", name: "User Management", icon: "fas fas fa-users" },
 ];
 
 function MainLayout({ currentPage, setCurrentPage, children }) {
@@ -50,15 +46,12 @@ function MainLayout({ currentPage, setCurrentPage, children }) {
         {/* Sidebar Navigation */}
         <nav className="w-64 bg-white border-r border-gray-200 h-screen sticky top-0">
           <div className="p-6">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">
-              Navigation
-            </h2>
             <ul className="space-y-1">
               {MENU_ITEMS.map((item) => (
                 <li key={item.id}>
                   <button
                     onClick={() => setCurrentPage(item.id)}
-                    className={`w-full flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    className={`w-full flex items-center cursor-pointer px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
                       currentPage === item.id
                         ? `${getCompanyClass("primary")} text-white shadow-sm`
                         : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"

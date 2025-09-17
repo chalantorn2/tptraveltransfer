@@ -2,7 +2,7 @@
 import { useState } from "react";
 import MainLayout from "./components/layout/MainLayout";
 import DashboardPage from "./components/pages/DashboardPage";
-import JobManagementPage from "./components/pages/JobManagementPage";
+import BookingManagementPage from "./components/pages/BookingManagementPage";
 import DriverManagementPage from "./components/pages/DriverManagementPage";
 import FreelanceJobsPage from "./components/pages/FreelanceJobsPage";
 import BookingOverviewPage from "./components/pages/BookingOverviewPage";
@@ -17,7 +17,7 @@ function App() {
       case "dashboard":
         return <DashboardPage />;
       case "jobs":
-        return <JobManagementPage />;
+        return <BookingManagementPage />;
       case "drivers":
         return <DriverManagementPage />;
       case "freelance":

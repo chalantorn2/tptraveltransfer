@@ -1,7 +1,130 @@
-// src/components/pages/DashboardPage.jsx - Clean UI with Font Awesome
+// src/components/pages/DashboardPage.jsx - Fixed UI
+import { useState, useEffect } from "react";
 import { getCompanyClass } from "../../config/company";
+import { backendApi } from "../../services/backendApi";
 
 function DashboardPage() {
+  // States สำหรับเก็บข้อมูล
+  const [bookingStats, setBookingStats] = useState({
+    newBookings: 0,
+    confirmed: 0,
+    cancelled: 0,
+    amendments: 0,
+  });
+  const [recentJobs, setRecentJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    current_page: 1,
+    total_pages: 1,
+    total_records: 0,
+    per_page: 10,
+    has_next: false,
+    has_prev: false,
+  });
+
+  const [syncLoading, setSyncLoading] = useState(false);
+
+  // ฟังก์ชันดึงข้อมูลจาก Backend
+  const fetchDashboardData = async (page = 1) => {
+    try {
+      setLoading(true);
+
+      const [statsResponse, jobsResponse] = await Promise.all([
+        backendApi.getDashboardStats(),
+        backendApi.getRecentJobs(10, "all", page),
+      ]);
+
+      if (statsResponse.success) {
+        setBookingStats(statsResponse.data.stats);
+      }
+
+      if (jobsResponse.success) {
+        setRecentJobs(jobsResponse.data.bookings);
+        setPagination(jobsResponse.data.pagination);
+        setCurrentPage(page);
+      }
+
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ฟังก์ชัน Sync & Refresh
+  const handleSyncAndRefresh = async () => {
+    try {
+      setSyncLoading(true);
+
+      // 1. Sync จาก Holiday Taxis
+      const syncResponse = await backendApi.syncHolidayTaxis();
+
+      // 2. ดึงข้อมูลใหม่จาก Database
+      if (syncResponse.success) {
+        await fetchDashboardData(currentPage);
+      } else {
+        alert(`Sync failed: ${syncResponse.error}`);
+      }
+    } catch (error) {
+      console.error("Sync error:", error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  // Helper function to format date
+  const formatDate = (dateString) => {
+    if (!dateString) return "N/A";
+    return new Date(dateString).toLocaleDateString("en-GB"); // DD/MM/YYYY format
+  };
+
+  // Helper function to format datetime
+  const formatDateTime = (dateString) => {
+    if (!dateString) return "N/A";
+    const date = new Date(dateString);
+    return `${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString(
+      "en-GB",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    )}`;
+  };
+
+  // Helper function to get readable status
+  const getReadableStatus = (status) => {
+    const statusMap = {
+      PCON: "Pending Confirmation",
+      ACON: "Confirmed",
+      ACAN: "Cancelled",
+      PAMM: "Pending Amendment",
+      AAMM: "Amendment Approved",
+    };
+    return statusMap[status] || status;
+  };
+
+  // Helper function to clean vehicle name
+  const cleanVehicleName = (vehicle) => {
+    if (!vehicle || vehicle === "N/A") return "N/A";
+    return vehicle
+      .replace(/^Private\s+/, "")
+      .replace(/^Shared\s+/, "")
+      .trim();
+  };
+
+  // Auto refresh every 1 hour (3600000ms) + initial load
+  useEffect(() => {
+    handleSyncAndRefresh(); // โหลดครั้งแรก + sync
+
+    const interval = setInterval(handleSyncAndRefresh, 3600000); // 1 ชั่วโมง
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -10,50 +133,34 @@ function DashboardPage() {
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-gray-600 mt-1">ภาพรวมงานทั้งหมดและสถิติประจำวัน</p>
         </div>
-        <button
-          className={`${getCompanyClass("primary")} ${getCompanyClass(
-            "primaryHover"
-          )} text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2`}
-        >
-          <i className="fas fa-sync-alt text-sm"></i>
-          <span>Refresh</span>
-        </button>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
           {
-            title: "งานวันนี้",
-            count: "12",
-            change: "+2.5%",
-            changeType: "increase",
+            title: "New Bookings / จองใหม่",
+            count: loading ? "..." : bookingStats.newBookings,
             icon: "fas fa-plus-circle",
             color: "blue",
           },
           {
-            title: "กำลังดำเนินการ",
-            count: "8",
-            change: "+12%",
-            changeType: "increase",
-            icon: "fas fa-spinner",
-            color: "yellow",
-          },
-          {
-            title: "เสร็จแล้ว",
-            count: "24",
-            change: "+8.2%",
-            changeType: "increase",
+            title: "Confirmed / ยืนยันแล้ว",
+            count: loading ? "..." : bookingStats.confirmed,
             icon: "fas fa-check-circle",
             color: "green",
           },
           {
-            title: "ยกเลิก",
-            count: "2",
-            change: "-1.4%",
-            changeType: "decrease",
+            title: "Cancelled / ยกเลิก",
+            count: loading ? "..." : bookingStats.cancelled,
             icon: "fas fa-times-circle",
             color: "red",
+          },
+          {
+            title: "Amendments / แก้ไข",
+            count: loading ? "..." : bookingStats.amendments,
+            icon: "fas fa-edit",
+            color: "yellow",
           },
         ].map((stat, index) => (
           <div
@@ -69,17 +176,8 @@ function DashboardPage() {
                   {stat.count}
                 </p>
                 <div className="flex items-center mt-2">
-                  <span
-                    className={`text-xs font-medium ${
-                      stat.changeType === "increase"
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {stat.change}
-                  </span>
-                  <span className="text-xs text-gray-500 ml-1">
-                    จากเมื่อวาน
+                  <span className="text-xs text-gray-500">
+                    อัปเดต: {lastUpdate.toLocaleTimeString("th-TH")}
                   </span>
                 </div>
               </div>
@@ -89,9 +187,9 @@ function DashboardPage() {
                     ? "bg-blue-50"
                     : stat.color === "yellow"
                     ? "bg-yellow-50"
-                    : stat.color === "green"
-                    ? "bg-green-50"
-                    : "bg-red-50"
+                    : stat.color === "red"
+                    ? "bg-red-50"
+                    : "bg-green-50"
                 }`}
               >
                 <i
@@ -100,9 +198,9 @@ function DashboardPage() {
                       ? "text-blue-600"
                       : stat.color === "yellow"
                       ? "text-yellow-600"
-                      : stat.color === "green"
-                      ? "text-green-600"
-                      : "text-red-600"
+                      : stat.color === "red"
+                      ? "text-red-600"
+                      : "text-green-600"
                   }`}
                 ></i>
               </div>
@@ -113,86 +211,187 @@ function DashboardPage() {
 
       {/* Recent Jobs */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+        {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <i className="fas fa-list-ul text-gray-400"></i>
               <h2 className="text-lg font-semibold text-gray-900">
-                งานล่าสุดจาก Holiday Taxis
+                Recent Bookings
               </h2>
             </div>
-            <span className="text-sm text-gray-500">
-              อัปเดตล่าสุด: {new Date().toLocaleTimeString("th-TH")}
-            </span>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-500">
+                Last updated: {lastUpdate.toLocaleTimeString("en-GB")}
+              </span>
+              <button
+                onClick={handleSyncAndRefresh}
+                disabled={syncLoading}
+                className="text-blue-600 cursor-pointer border p-1.5 rounded-sm backu  hover:text-white hover:bg-blue-600 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <i
+                  className={`fas fa-sync-alt mr-1 ${
+                    syncLoading ? "animate-spin" : ""
+                  }`}
+                ></i>
+                Sync & Refresh
+              </button>
+            </div>
           </div>
         </div>
 
+        {/* Content */}
         <div className="p-6">
-          <div className="text-center py-12">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <i className="fas fa-inbox text-2xl text-gray-400"></i>
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i className="fas fa-spinner animate-spin text-2xl text-gray-400"></i>
+              </div>
+              <p className="text-gray-500 font-medium">Loading data...</p>
+              <p className="text-sm text-gray-400 mt-1">
+                Fetching data from database...
+              </p>
             </div>
-            <p className="text-gray-500 font-medium">ไม่มีงานใหม่ในขณะนี้</p>
-            <p className="text-sm text-gray-400 mt-1">
-              รอการเชื่อมต่อ Holiday Taxis API...
-            </p>
-            <button className="mt-4 text-sm text-blue-600 hover:text-blue-700 font-medium">
-              <i className="fas fa-sync-alt mr-1"></i>
-              รีเฟรชข้อมูล
-            </button>
-          </div>
-        </div>
-      </div>
+          ) : recentJobs.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i className="fas fa-database text-2xl text-gray-400"></i>
+              </div>
+              <p className="text-gray-500 font-medium">No data in database</p>
+              <p className="text-sm text-gray-400 mt-1">
+                Data will sync automatically every hour
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Booking Ref
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Status
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Passenger
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Pickup Date
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Vehicle
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Last Action
+                    </th>
+                  </tr>
+                </thead>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-              <i className="fas fa-plus text-blue-600"></i>
-            </div>
-            <h3 className="font-semibold text-gray-900">เพิ่มงานใหม่</h3>
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
-            สร้างงานใหม่หรือ import จาก Holiday Taxis
-          </p>
-          <button
-            className={`w-full ${getCompanyClass(
-              "primary"
-            )} text-white py-2 px-4 rounded-lg font-medium text-sm hover:opacity-90 transition-opacity`}
-          >
-            เริ่มต้น
-          </button>
-        </div>
+                <tbody>
+                  {recentJobs.map((job, index) => (
+                    <tr
+                      key={index}
+                      className="border-b border-gray-100 hover:bg-gray-50"
+                    >
+                      <td className="py-3 px-4">
+                        <button
+                          className="text-blue-600 hover:text-blue-800 font-medium cursor-pointer hover:underline"
+                          onClick={() =>
+                            alert(
+                              `View details for ${job.ref}\n\nWill navigate to Booking Management page`
+                            )
+                          }
+                        >
+                          {job.ref}
+                        </button>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`px-2 py-1 text-xs font-medium  rounded-full  ${
+                            job.status === "PCON"
+                              ? "bg-blue-100 text-blue-800"
+                              : job.status === "ACON"
+                              ? "bg-green-100 text-green-800"
+                              : job.status === "ACAN"
+                              ? "bg-red-100 text-red-800"
+                              : job.status === "PAMM"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : job.status === "AAMM"
+                              ? "bg-purple-100 text-purple-800"
+                              : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {getReadableStatus(job.status)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-normal text-gray-900">
+                          {job.passenger?.name || "N/A"}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4 text-sm font-normal text-gray-600">
+                        {formatDate(job.pickupDate)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="text-sm font-normal text-gray-900">
+                          {cleanVehicleName(job.vehicle)}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4 text-sm font-normal text-gray-600">
+                        {formatDateTime(job.lastActionDate)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
-              <i className="fas fa-user-plus text-green-600"></i>
-            </div>
-            <h3 className="font-semibold text-gray-900">เพิ่มคนขับ</h3>
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
-            จัดการข้อมูลคนขับใหม่ในระบบ
-          </p>
-          <button className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg font-medium text-sm hover:bg-gray-200 transition-colors">
-            จัดการ
-          </button>
-        </div>
+              {/* Table Footer */}
+              <div className="mt-4 text-center text-sm text-gray-500">
+                Showing {recentJobs.length} bookings | Auto-sync every hour
+              </div>
+              {pagination.total_pages > 1 && (
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="text-sm text-gray-500">
+                    Showing {(currentPage - 1) * 10 + 1} to{" "}
+                    {Math.min(currentPage * 10, pagination.total_records)} of{" "}
+                    {pagination.total_records} bookings
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => fetchDashboardData(currentPage - 1)}
+                      disabled={!pagination.has_prev}
+                      className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center space-x-3 mb-4">
-            <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
-              <i className="fas fa-chart-line text-purple-600"></i>
+                    {[...Array(pagination.total_pages)].map((_, index) => (
+                      <button
+                        key={index + 1}
+                        onClick={() => fetchDashboardData(index + 1)}
+                        className={`px-3 py-1 text-sm border rounded ${
+                          currentPage === index + 1
+                            ? "bg-blue-500 text-white"
+                            : "hover:bg-gray-50"
+                        }`}
+                      >
+                        {index + 1}
+                      </button>
+                    ))}
+
+                    <button
+                      onClick={() => fetchDashboardData(currentPage + 1)}
+                      disabled={!pagination.has_next}
+                      className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <h3 className="font-semibold text-gray-900">ดูรายงาน</h3>
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
-            สถิติและรายงานประสิทธิภาพ
-          </p>
-          <button className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg font-medium text-sm hover:bg-gray-200 transition-colors">
-            ดูรายงาน
-          </button>
+          )}
         </div>
       </div>
     </div>
