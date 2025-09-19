@@ -65,7 +65,7 @@ try {
 
     // Format response - อ่าน vehicle จาก raw_data
     $formattedJobs = array_map(function ($job) {
-        $vehicle = 'N/A';
+        $vehicle = '-';
         $passengerPhone = $job['passenger_phone'];
 
         if (!empty($job['raw_data'])) {
@@ -82,7 +82,7 @@ try {
             'ref' => $job['booking_ref'],
             'status' => $job['ht_status'],
             'passenger' => [
-                'name' => $job['passenger_name'] ?? 'N/A',
+                'name' => $job['passenger_name'] ?? '-',
                 'phone' => $passengerPhone
             ],
             'pax' => (int)$job['pax_total'] ?? 1,

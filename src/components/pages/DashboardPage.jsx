@@ -1,10 +1,12 @@
-// src/components/pages/DashboardPage.jsx - Fixed UI
-import { useState, useEffect } from "react";
+// src/components/pages/DashboardPage.jsx - Original UI with Enhanced Backend
+import { useState, useEffect, useContext } from "react";
 import { getCompanyClass } from "../../config/company";
 import { backendApi } from "../../services/backendApi";
+import { BookingContext } from "../../App";
 
 function DashboardPage() {
-  // States สำหรับเก็บข้อมูล
+  const { setSelectedBookingRef, setCurrentPage: setAppPage } =
+    useContext(BookingContext);
   const [bookingStats, setBookingStats] = useState({
     newBookings: 0,
     confirmed: 0,
@@ -27,11 +29,45 @@ function DashboardPage() {
 
   const [syncLoading, setSyncLoading] = useState(false);
 
-  // ฟังก์ชันดึงข้อมูลจาก Backend
+  // ฟังก์ชันดึงข้อมูลจาก Enhanced Backend แต่ fallback ถ้าไม่ได้
   const fetchDashboardData = async (page = 1) => {
     try {
       setLoading(true);
 
+      // Try enhanced dashboard first
+      const enhancedResponse = await backendApi.getEnhancedDashboardData();
+
+      if (enhancedResponse.success && enhancedResponse.data) {
+        // Use enhanced data
+        const data = enhancedResponse.data;
+
+        if (data.stats && data.stats.stats) {
+          setBookingStats(data.stats.stats);
+        }
+
+        if (data.recent_bookings) {
+          setRecentJobs(data.recent_bookings);
+          // Create pagination from enhanced data
+          setPagination({
+            current_page: 1,
+            total_pages: 1,
+            total_records: data.recent_bookings.length,
+            per_page: data.recent_bookings.length,
+            has_next: false,
+            has_prev: false,
+          });
+          setCurrentPage(1);
+        }
+
+        if (data.last_sync) {
+          setLastUpdate(new Date(data.last_sync));
+        } else {
+          setLastUpdate(new Date()); // fallback ถ้าไม่มี
+        }
+        return;
+      }
+
+      // Fallback to original APIs
       const [statsResponse, jobsResponse] = await Promise.all([
         backendApi.getDashboardStats(),
         backendApi.getRecentJobs(10, "all", page),
@@ -61,12 +97,14 @@ function DashboardPage() {
       setSyncLoading(true);
 
       // 1. Sync จาก Holiday Taxis
-      const syncResponse = await backendApi.syncHolidayTaxis();
+      const syncResponse = await backendApi.syncHolidayTaxis(7, true);
 
       // 2. ดึงข้อมูลใหม่จาก Database
       if (syncResponse.success) {
         await fetchDashboardData(currentPage);
+        // ลบ alert ออก - ไม่แสดงอะไร
       } else {
+        // เก็บแค่ error alert
         alert(`Sync failed: ${syncResponse.error}`);
       }
     } catch (error) {
@@ -77,15 +115,15 @@ function DashboardPage() {
     }
   };
 
-  // Helper function to format date
+  // formatDate function แก้
   const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString("en-GB"); // DD/MM/YYYY format
+    if (!dateString || dateString === "0000-00-00 00:00:00") return "-";
+    return new Date(dateString).toLocaleDateString("en-GB");
   };
 
   // Helper function to format datetime
   const formatDateTime = (dateString) => {
-    if (!dateString) return "N/A";
+    if (!dateString) return "-";
     const date = new Date(dateString);
     return `${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString(
       "en-GB",
@@ -110,19 +148,16 @@ function DashboardPage() {
 
   // Helper function to clean vehicle name
   const cleanVehicleName = (vehicle) => {
-    if (!vehicle || vehicle === "N/A") return "N/A";
+    if (!vehicle || vehicle === "-") return "-";
     return vehicle
       .replace(/^Private\s+/, "")
       .replace(/^Shared\s+/, "")
       .trim();
   };
 
-  // Auto refresh every 1 hour (3600000ms) + initial load
+  // แค่โหลดข้อมูลจาก DB เฉยๆ
   useEffect(() => {
-    handleSyncAndRefresh(); // โหลดครั้งแรก + sync
-
-    const interval = setInterval(handleSyncAndRefresh, 3600000); // 1 ชั่วโมง
-    return () => clearInterval(interval);
+    fetchDashboardData(); // โหลดครั้งแรกเฉยๆ ไม่ sync
   }, []);
 
   return (
@@ -222,12 +257,13 @@ function DashboardPage() {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-500">
-                Last updated: {lastUpdate.toLocaleTimeString("en-GB")}
+                Last synced: {lastUpdate.toLocaleTimeString("en-GB")} (
+                {lastUpdate.toLocaleDateString("en-GB")})
               </span>
               <button
                 onClick={handleSyncAndRefresh}
                 disabled={syncLoading}
-                className="text-blue-600 cursor-pointer border p-1.5 rounded-sm backu  hover:text-white hover:bg-blue-600 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-blue-600 cursor-pointer border p-1.5 rounded-sm hover:text-white hover:bg-blue-600 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <i
                   className={`fas fa-sync-alt mr-1 ${
@@ -283,7 +319,7 @@ function DashboardPage() {
                       Vehicle
                     </th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700">
-                      Last Action
+                      Sync Time
                     </th>
                   </tr>
                 </thead>
@@ -297,11 +333,13 @@ function DashboardPage() {
                       <td className="py-3 px-4">
                         <button
                           className="text-blue-600 hover:text-blue-800 font-medium cursor-pointer hover:underline"
-                          onClick={() =>
-                            alert(
-                              `View details for ${job.ref}\n\nWill navigate to Booking Management page`
-                            )
-                          }
+                          onClick={() => {
+                            setSelectedBookingRef({
+                              ref: job.ref,
+                              fromPage: "dashboard",
+                            });
+                            setAppPage("booking-detail");
+                          }}
                         >
                           {job.ref}
                         </button>
@@ -327,7 +365,7 @@ function DashboardPage() {
                       </td>
                       <td className="py-3 px-4">
                         <p className="font-normal text-gray-900">
-                          {job.passenger?.name || "N/A"}
+                          {job.passenger?.name || "-"}
                         </p>
                       </td>
                       <td className="py-3 px-4 text-sm font-normal text-gray-600">
@@ -339,7 +377,7 @@ function DashboardPage() {
                         </p>
                       </td>
                       <td className="py-3 px-4 text-sm font-normal text-gray-600">
-                        {formatDateTime(job.lastActionDate)}
+                        {formatDateTime(job.createdAt || job.updatedAt)}
                       </td>
                     </tr>
                   ))}
