@@ -1,16 +1,57 @@
-// src/components/layout/MainLayout.jsx - Clean UI with Font Awesome
+// src/components/layout/MainLayout.jsx - Updated with User Info and Role-based Menu
 import { COMPANY_NAME, getCompanyClass } from "../../config/company";
 
 const MENU_ITEMS = [
-  { id: "dashboard", name: "Dashboard", icon: "fas fa-chart-line" },
-  { id: "jobs", name: "Booking Management", icon: "fas fa-tasks" }, // ← เปลี่ยนแล้ว
-  { id: "drivers", name: "Driver Management", icon: "fas fa-car-side" },
-  { id: "freelance", name: "Freelance Jobs", icon: "fas fa-car" },
-  { id: "booking", name: "Booking Overview", icon: "fas fa-calendar-days" },
-  { id: "usermanagement", name: "User Management", icon: "fas fas fa-users" },
+  {
+    id: "dashboard",
+    name: "Dashboard",
+    icon: "fas fa-chart-line",
+    roles: ["admin", "user"],
+  },
+  {
+    id: "jobs",
+    name: "Booking Management",
+    icon: "fas fa-tasks",
+    roles: ["admin", "user"],
+  },
+  {
+    id: "drivers",
+    name: "Driver Management",
+    icon: "fas fa-car-side",
+    roles: ["admin", "user"],
+  },
+  {
+    id: "freelance",
+    name: "Freelance Jobs",
+    icon: "fas fa-car",
+    roles: ["admin", "user"],
+  },
+  {
+    id: "booking",
+    name: "Booking Overview",
+    icon: "fas fa-calendar-days",
+    roles: ["admin", "user"],
+  },
+  {
+    id: "usermanagement",
+    name: "User Management",
+    icon: "fas fa-users",
+    roles: ["admin"],
+  }, // Only admin
 ];
 
-function MainLayout({ currentPage, setCurrentPage, children }) {
+function MainLayout({ currentPage, setCurrentPage, children, user, onLogout }) {
+  // Filter menu items based on user role
+  const visibleMenuItems = MENU_ITEMS.filter((item) =>
+    item.roles.includes(user?.role || "user")
+  );
+
+  // Custom setCurrentPage that saves to localStorage
+  const handlePageChange = (pageId) => {
+    setCurrentPage(pageId);
+    localStorage.setItem("currentPage", pageId);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -31,10 +72,18 @@ function MainLayout({ currentPage, setCurrentPage, children }) {
 
             <div className="flex items-center space-x-4">
               <div className="text-right">
-                <p className="text-sm font-medium">Admin User</p>
-                <p className="text-xs text-white/70">Administrator</p>
+                <p className="text-sm font-medium">
+                  {user?.full_name || "User"}
+                </p>
+                <p className="text-xs text-white/70 capitalize">
+                  {user?.role || "Staff"}
+                </p>
               </div>
-              <button className="bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-colors">
+              <button
+                onClick={onLogout}
+                className="bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-colors"
+                title="Logout"
+              >
                 <i className="fas fa-sign-out-alt text-sm"></i>
               </button>
             </div>
@@ -47,10 +96,10 @@ function MainLayout({ currentPage, setCurrentPage, children }) {
         <nav className="w-64 bg-white border-r border-gray-200 h-screen sticky top-0">
           <div className="p-6">
             <ul className="space-y-1">
-              {MENU_ITEMS.map((item) => (
+              {visibleMenuItems.map((item) => (
                 <li key={item.id}>
                   <button
-                    onClick={() => setCurrentPage(item.id)}
+                    onClick={() => handlePageChange(item.id)}
                     className={`w-full flex items-center cursor-pointer px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
                       currentPage === item.id
                         ? `${getCompanyClass("primary")} text-white shadow-sm`
@@ -81,9 +130,11 @@ function MainLayout({ currentPage, setCurrentPage, children }) {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 truncate">
-                  Admin
+                  {user?.full_name || "User"}
                 </p>
-                <p className="text-xs text-gray-500 truncate">Online</p>
+                <p className="text-xs text-gray-500 truncate capitalize">
+                  {user?.role || "Staff"} • Online
+                </p>
               </div>
               <div className="w-2 h-2 bg-green-400 rounded-full"></div>
             </div>
