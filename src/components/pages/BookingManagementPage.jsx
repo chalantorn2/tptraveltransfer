@@ -49,7 +49,7 @@ function BookingManagementPage() {
       const response = await fetch(
         `${
           import.meta.env.VITE_API_BASE_URL ||
-          "https://www.tptraveltransfer.com//api"
+          "https://staff.phuketgevalin.com/api"
         }/bookings/database-search.php?${params}`
       );
       const data = await response.json();
@@ -134,6 +134,7 @@ function BookingManagementPage() {
     const statusMap = {
       PCON: "Pending Confirmation",
       ACON: "Confirmed",
+      PCAN: "Pending Cancellation",
       ACAN: "Cancelled",
       PAMM: "Pending Amendment",
       AAMM: "Amendment Approved",
@@ -176,7 +177,7 @@ function BookingManagementPage() {
               value={filters.search}
               onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Booking Ref or Passenger Name"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
           </div>
 
@@ -188,7 +189,7 @@ function BookingManagementPage() {
             <select
               value={filters.status}
               onChange={(e) => handleFilterChange("status", e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             >
               <option value="all">All Status</option>
               <option value="PCON">Pending Confirmation</option>
@@ -207,7 +208,7 @@ function BookingManagementPage() {
             <select
               value={filters.dateType}
               onChange={(e) => handleFilterChange("dateType", e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             >
               <option value="pickup">Pickup Date</option>
               <option value="arrival">Arrival Date</option>
@@ -223,7 +224,7 @@ function BookingManagementPage() {
               type="date"
               value={filters.dateFrom}
               onChange={(e) => handleFilterChange("dateFrom", e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
           </div>
 
@@ -236,7 +237,7 @@ function BookingManagementPage() {
               type="date"
               value={filters.dateTo}
               onChange={(e) => handleFilterChange("dateTo", e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
           </div>
         </div>
@@ -351,9 +352,11 @@ function BookingManagementPage() {
                       <span
                         className={`px-2 py-1 text-xs font-medium rounded-full whitespace-nowrap ${
                           booking.status === "PCON"
-                            ? "bg-cyan-100 text-cyan-800"
+                            ? "bg-blue-100 text-blue-800"
                             : booking.status === "ACON"
                             ? "bg-green-100 text-green-800"
+                            : booking.status === "PCAN"
+                            ? "bg-orange-100 text-orange-800"
                             : booking.status === "ACAN"
                             ? "bg-red-100 text-red-800"
                             : booking.status === "PAMM"

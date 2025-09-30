@@ -139,6 +139,7 @@ function DashboardPage() {
     const statusMap = {
       PCON: "Pending Confirmation",
       ACON: "Confirmed",
+      PCAN: "Pending Cancellation",
       ACAN: "Cancelled",
       PAMM: "Pending Amendment",
       AAMM: "Amendment Approved",
@@ -351,6 +352,8 @@ function DashboardPage() {
                               ? "bg-blue-100 text-blue-800"
                               : job.status === "ACON"
                               ? "bg-green-100 text-green-800"
+                              : job.status === "PCAN"
+                              ? "bg-orange-100 text-orange-800"
                               : job.status === "ACAN"
                               ? "bg-red-100 text-red-800"
                               : job.status === "PAMM"

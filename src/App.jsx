@@ -9,6 +9,7 @@ import FreelanceJobsPage from "./components/pages/FreelanceJobsPage";
 import BookingOverviewPage from "./components/pages/BookingOverviewPage";
 import UserManagementPage from "./components/pages/UserManagementPage";
 import BookingDetailPage from "./components/pages/BookingDetailPage";
+import VehicleManagementPage from "./components/pages/VehicleManagementPage";
 import "./App.css";
 
 export const BookingContext = createContext();
@@ -125,6 +126,8 @@ function App() {
         return <BookingManagementPage />;
       case "drivers":
         return <DriverManagementPage />;
+      case "vehicles":
+        return <VehicleManagementPage />;
       case "freelance":
         return <FreelanceJobsPage />;
       case "booking":

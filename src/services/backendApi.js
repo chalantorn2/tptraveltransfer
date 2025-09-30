@@ -411,6 +411,7 @@ export const statusUtils = {
     const statusMap = {
       PCON: "Pending Confirmation",
       ACON: "Confirmed",
+      PCAN: "Pending Cancellation",
       ACAN: "Cancelled",
       PAMM: "Pending Amendment",
       AAMM: "Amendment Approved",
@@ -423,6 +424,7 @@ export const statusUtils = {
     const colorMap = {
       PCON: "bg-cyan-100 text-cyan-800",
       ACON: "bg-green-100 text-green-800",
+      PCAN: "bg-orange-100 text-orange-800",
       ACAN: "bg-red-100 text-red-800",
       PAMM: "bg-yellow-100 text-yellow-800",
       AAMM: "bg-purple-100 text-purple-800",

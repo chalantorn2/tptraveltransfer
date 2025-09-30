@@ -17,13 +17,19 @@ const MENU_ITEMS = [
   {
     id: "drivers",
     name: "Driver Management",
+    icon: "fas fa-user-tie",
+    roles: ["admin", "user"],
+  },
+  {
+    id: "vehicles",
+    name: "Vehicle Management",
     icon: "fas fa-car-side",
     roles: ["admin", "user"],
   },
   {
     id: "freelance",
     name: "Freelance Jobs",
-    icon: "fas fa-car",
+    icon: "fa-solid fa-id-card",
     roles: ["admin", "user"],
   },
   {

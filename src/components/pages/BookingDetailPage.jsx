@@ -125,6 +125,7 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
     const statusMap = {
       PCON: "Pending Confirmation",
       ACON: "Confirmed",
+      PCAN: "Pending Cancellation",
       ACAN: "Cancelled",
       PAMM: "Pending Amendment",
       AAMM: "Amendment Approved",
@@ -277,9 +278,11 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   // Status chip color
   const statusColor =
     general.status === "PCON"
-      ? "bg-cyan-100 text-cyan-800"
+      ? "bg-blue-100 text-blue-800"
       : general.status === "ACON"
       ? "bg-green-100 text-green-800"
+      : general.status === "PCAN"
+      ? "bg-orange-100 text-orange-800"
       : general.status === "ACAN"
       ? "bg-red-100 text-red-800"
       : general.status === "PAMM"
