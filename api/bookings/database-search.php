@@ -21,12 +21,10 @@ try {
     $status = $_GET['status'] ?? 'all';
     $dateFrom = $_GET['date_from'] ?? null;
     $dateTo = $_GET['date_to'] ?? null;
-    $dateType = $_GET['date_type'] ?? 'pickup'; // 'pickup' or 'arrival'
+    $dateType = $_GET['date_type'] ?? 'pickup';
     $search = trim($_GET['search'] ?? '');
 
-    // Debug logging
     error_log("Search API Debug - Search term: '$search'");
-    error_log("Search API Debug - Other params: " . json_encode($_GET));
 
     // Base WHERE clause
     $whereClause = "WHERE 1=1";
@@ -34,7 +32,7 @@ try {
 
     // Status filter
     if ($status !== 'all') {
-        $whereClause .= " AND ht_status = ?";
+        $whereClause .= " AND b.ht_status = ?";
         $params[] = $status;
     }
 
@@ -42,59 +40,56 @@ try {
     if ($dateFrom || $dateTo) {
         if ($dateFrom && $dateTo) {
             if ($dateType === 'arrival') {
-                $whereClause .= " AND DATE(arrival_date) BETWEEN ? AND ?";
-            } else { // pickup
-                $whereClause .= " AND DATE(pickup_date) BETWEEN ? AND ?";
+                $whereClause .= " AND DATE(b.arrival_date) BETWEEN ? AND ?";
+            } else {
+                $whereClause .= " AND DATE(b.pickup_date) BETWEEN ? AND ?";
             }
             $params[] = $dateFrom;
             $params[] = $dateTo;
         } elseif ($dateFrom) {
             if ($dateType === 'arrival') {
-                $whereClause .= " AND DATE(arrival_date) = ?";
-            } else { // pickup
-                $whereClause .= " AND DATE(pickup_date) = ?";
+                $whereClause .= " AND DATE(b.arrival_date) = ?";
+            } else {
+                $whereClause .= " AND DATE(b.pickup_date) = ?";
             }
             $params[] = $dateFrom;
         } elseif ($dateTo) {
             if ($dateType === 'arrival') {
-                $whereClause .= " AND DATE(arrival_date) = ?";
-            } else { // pickup
-                $whereClause .= " AND DATE(pickup_date) = ?";
+                $whereClause .= " AND DATE(b.arrival_date) = ?";
+            } else {
+                $whereClause .= " AND DATE(b.pickup_date) = ?";
             }
             $params[] = $dateTo;
         }
     }
 
-    // Search filter (Booking Ref or Passenger Name) - Case insensitive
+    // Search filter
     if (!empty($search)) {
-        $whereClause .= " AND (LOWER(booking_ref) LIKE LOWER(?) OR LOWER(passenger_name) LIKE LOWER(?))";
+        $whereClause .= " AND (LOWER(b.booking_ref) LIKE LOWER(?) OR LOWER(b.passenger_name) LIKE LOWER(?))";
         $searchParam = '%' . $search . '%';
         $params[] = $searchParam;
         $params[] = $searchParam;
-        error_log("Search API Debug - WHERE clause: $whereClause");
-        error_log("Search API Debug - Search param: $searchParam");
     }
 
-    // Check if this is a default query (no search, no date filters)
     $isDefaultQuery = empty($search) && empty($dateFrom) && empty($dateTo) && $status === 'all';
     $maxDefaultResults = 100;
 
-    error_log("DEBUG: isDefaultQuery = " . ($isDefaultQuery ? 'true' : 'false'));
-
-    // Get total count for pagination
+    // Get total count
     if ($isDefaultQuery) {
-        // For default query, limit to recent 100 bookings
         $countSql = "SELECT COUNT(*) as total FROM (
-            SELECT id FROM bookings $whereClause 
-            ORDER BY pickup_date DESC, created_at DESC 
+            SELECT b.id FROM bookings b
+            LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
+            $whereClause 
+            ORDER BY b.pickup_date IS NULL, b.pickup_date ASC, b.created_at DESC 
             LIMIT $maxDefaultResults
         ) as limited_bookings";
         $countStmt = $pdo->prepare($countSql);
         $countStmt->execute($params);
         $totalRecords = min($countStmt->fetch()['total'], $maxDefaultResults);
     } else {
-        // For filtered queries, count all matching records
-        $countSql = "SELECT COUNT(*) as total FROM bookings $whereClause";
+        $countSql = "SELECT COUNT(*) as total FROM bookings b
+                     LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
+                     $whereClause";
         $countStmt = $pdo->prepare($countSql);
         $countStmt->execute($params);
         $totalRecords = $countStmt->fetch()['total'];
@@ -102,73 +97,74 @@ try {
 
     // Get paginated bookings
     if ($isDefaultQuery) {
-        // For default query, limit to recent bookings first
         $sql = "SELECT * FROM (
             SELECT 
-                booking_ref,
-                ht_status,
-                passenger_name,
-                passenger_phone,
-                pax_total,
-                adults,
-                children,
-                infants,
-                booking_type,
-                vehicle_type,
-                airport,
-                resort,
-                accommodation_name,
-                arrival_date,
-                departure_date,
-                pickup_date,
-                last_action_date,
-                created_at,
-                raw_data
-            FROM bookings
+                b.booking_ref,
+                b.ht_status,
+                b.passenger_name,
+                b.passenger_phone,
+                b.pax_total,
+                b.adults,
+                b.children,
+                b.infants,
+                b.booking_type,
+                b.vehicle_type,
+                b.airport,
+                b.resort,
+                b.accommodation_name,
+                b.arrival_date,
+                b.departure_date,
+                b.pickup_date,
+                b.last_action_date,
+                b.created_at,
+                b.raw_data,
+                CASE WHEN dva.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned
+            FROM bookings b
+            LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
             $whereClause
-            ORDER BY pickup_date DESC, created_at DESC
+            ORDER BY b.pickup_date IS NULL, b.pickup_date ASC, b.created_at DESC
             LIMIT $maxDefaultResults
         ) as limited_bookings
-        ORDER BY pickup_date DESC, created_at DESC
+        ORDER BY pickup_date IS NULL, pickup_date ASC, created_at DESC
         LIMIT ? OFFSET ?";
     } else {
-        // For filtered queries, use original query
         $sql = "SELECT 
-            booking_ref,
-            ht_status,
-            passenger_name,
-            passenger_phone,
-            pax_total,
-            adults,
-            children,
-            infants,
-            booking_type,
-            vehicle_type,
-            airport,
-            resort,
-            accommodation_name,
-            arrival_date,
-            departure_date,
-            pickup_date,
-            last_action_date,
-            created_at,
-            raw_data
-        FROM bookings
+            b.booking_ref,
+            b.ht_status,
+            b.passenger_name,
+            b.passenger_phone,
+            b.pax_total,
+            b.adults,
+            b.children,
+            b.infants,
+            b.booking_type,
+            b.vehicle_type,
+            b.airport,
+            b.resort,
+            b.accommodation_name,
+            b.arrival_date,
+            b.departure_date,
+            b.pickup_date,
+            b.last_action_date,
+            b.created_at,
+            b.raw_data,
+            CASE WHEN dva.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned
+        FROM bookings b
+        LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
         $whereClause
-        ORDER BY pickup_date DESC, created_at DESC
+        ORDER BY b.pickup_date IS NULL, b.pickup_date ASC, b.created_at DESC
         LIMIT ? OFFSET ?";
     }
 
-    // Prepare all parameters in correct order
-    $allParams = $params;              // Get all WHERE clause parameters
-    $allParams[] = (int)$limit;        // Add LIMIT parameter
-    $allParams[] = (int)$offset;       // Add OFFSET parameter
+    $allParams = $params;
+    $allParams[] = (int)$limit;
+    $allParams[] = (int)$offset;
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($allParams);
     $bookings = $stmt->fetchAll();
 
-    // Format response data
+    // Format response
     $formattedBookings = array_map(function ($booking) {
         $vehicle = '-';
         $passengerPhone = $booking['passenger_phone'];
@@ -207,7 +203,8 @@ try {
                 'name' => $booking['accommodation_name']
             ],
             'lastActionDate' => $booking['last_action_date'],
-            'createdAt' => $booking['created_at']
+            'createdAt' => $booking['created_at'],
+            'is_assigned' => (int)$booking['is_assigned']
         ];
     }, $bookings);
 
@@ -235,13 +232,6 @@ try {
                 'search' => $search,
                 'limit' => (int)$limit
             ],
-            'debug' => [
-                'where_clause' => $whereClause,
-                'params_count' => count($params),
-                'total_found' => (int)$totalRecords,
-                'search_term' => $search,
-                'is_default_query' => $isDefaultQuery
-            ],
             'lastUpdate' => date('Y-m-d H:i:s')
         ]
     ];
@@ -252,11 +242,7 @@ try {
     http_response_code(500);
     echo json_encode([
         'success' => false,
-        'error' => 'Database error: ' . $e->getMessage(),
-        'debug' => [
-            'sql_error' => $e->getMessage(),
-            'error_code' => $e->getCode()
-        ]
+        'error' => 'Database error: ' . $e->getMessage()
     ]);
 } catch (Exception $e) {
     error_log("General Error: " . $e->getMessage());

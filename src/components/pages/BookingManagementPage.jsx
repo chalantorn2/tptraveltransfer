@@ -9,6 +9,7 @@ function BookingManagementPage() {
 
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [pagination, setPagination] = useState({
     current_page: 1,
     total_pages: 1,
@@ -49,7 +50,7 @@ function BookingManagementPage() {
       const response = await fetch(
         `${
           import.meta.env.VITE_API_BASE_URL ||
-          "https://staff.phuketgevalin.com/api"
+          "https://www.tptraveltransfer.com/api"
         }/bookings/database-search.php?${params}`
       );
       const data = await response.json();
@@ -87,16 +88,27 @@ function BookingManagementPage() {
     setFilters(newFilters);
   };
 
-  // Debounce search
   useEffect(() => {
     const timeoutId = setTimeout(
       () => {
         fetchBookings(filters);
       },
       filters.search.trim() ? 300 : 0
-    ); // 300ms delay for search, immediate for other filters
+    );
 
     return () => clearTimeout(timeoutId);
+  }, [filters, fetchBookings, refreshTrigger]);
+
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchBookings(filters);
+    };
+
+    window.addEventListener("refreshBookings", handleRefresh);
+
+    return () => {
+      window.removeEventListener("refreshBookings", handleRefresh);
+    };
   }, [filters, fetchBookings]);
 
   // Calculate page numbers for pagination
@@ -321,7 +333,7 @@ function BookingManagementPage() {
                     Vehicle
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-700 border-b">
-                    Sync Time
+                    Assignment
                   </th>
                 </tr>
               </thead>
@@ -392,8 +404,18 @@ function BookingManagementPage() {
                         {cleanVehicleName(booking.vehicle)}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-sm text-gray-600">
-                      {formatDateTime(booking.createdAt)}
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {booking.is_assigned ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          <i className="fas fa-check-circle mr-1.5"></i>
+                          Assigned
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                          <i className="fas fa-circle mr-1.5"></i>
+                          Not Assigned
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -1,7 +1,8 @@
 // src/components/pages/BookingDetailPage.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import { backendApi } from "../../services/backendApi";
 import { getCompanyClass } from "../../config/company";
+import { BookingContext } from "../../App";
 
 function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const [bookingDetail, setBookingDetail] = useState(null);
@@ -10,13 +11,246 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const [notesLoading, setNotesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [assignment, setAssignment] = useState(null);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [drivers, setDrivers] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const { refreshBookings } = useContext(BookingContext);
+  const [driverSearchTerm, setDriverSearchTerm] = useState("");
+  const [vehicleSearchTerm, setVehicleSearchTerm] = useState("");
+  const [showDriverDropdown, setShowDriverDropdown] = useState(false);
+  const [showVehicleDropdown, setShowVehicleDropdown] = useState(false);
 
-  // Get the actual ref from bookingRef (could be object or string)
+  const filteredDrivers = drivers.filter(
+    (d) =>
+      d.name.toLowerCase().includes(driverSearchTerm.toLowerCase()) ||
+      d.phone_number.includes(driverSearchTerm)
+  );
+
+  const filteredVehicles = vehicles.filter(
+    (v) =>
+      v.registration.toLowerCase().includes(vehicleSearchTerm.toLowerCase()) ||
+      (v.brand &&
+        v.brand.toLowerCase().includes(vehicleSearchTerm.toLowerCase())) ||
+      (v.model &&
+        v.model.toLowerCase().includes(vehicleSearchTerm.toLowerCase()))
+  );
+
+  const [assignmentForm, setAssignmentForm] = useState({
+    driver_id: "",
+    vehicle_id: "",
+    notes: "",
+  });
+  const [assignLoading, setAssignLoading] = useState(false);
+
   const ref = bookingRef?.ref || bookingRef;
+
+  // === Assignment Functions ===
+  const fetchAssignment = async () => {
+    try {
+      const response = await fetch(
+        `/api/assignments/assign.php?booking_ref=${ref}`
+      );
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        setAssignment(data.data);
+      }
+    } catch (error) {
+      console.error("Error fetching assignment:", error);
+    }
+  };
+
+  const fetchDriversAndVehicles = async () => {
+    try {
+      const [driversRes, vehiclesRes] = await Promise.all([
+        fetch("/api/drivers/manage.php"),
+        fetch("/api/vehicles/manage.php"),
+      ]);
+
+      const driversData = await driversRes.json();
+      const vehiclesData = await vehiclesRes.json();
+
+      if (driversData.success) {
+        setDrivers(driversData.data.filter((d) => d.status === "active"));
+      }
+
+      if (vehiclesData.success) {
+        setVehicles(vehiclesData.data.filter((v) => v.status === "active"));
+      }
+    } catch (error) {
+      console.error("Error fetching drivers/vehicles:", error);
+    }
+  };
+
+  const handleDriverChange = (driverId) => {
+    const driver = drivers.find((d) => d.id == driverId);
+    setAssignmentForm({
+      ...assignmentForm,
+      driver_id: driverId,
+      vehicle_id: driver?.default_vehicle_id || "",
+    });
+  };
+
+  const handleAssignJob = async () => {
+    if (!assignmentForm.driver_id || !assignmentForm.vehicle_id) {
+      alert("Please select driver and vehicle");
+      return;
+    }
+
+    try {
+      setAssignLoading(true);
+
+      const response = await fetch("/api/assignments/assign.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          booking_ref: ref,
+          ...assignmentForm,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert("Job assigned successfully!");
+        setShowAssignModal(false);
+        fetchAssignment();
+        setAssignmentForm({ driver_id: "", vehicle_id: "", notes: "" });
+
+        // ← เพิ่มบรรทัดนี้: Trigger refresh ใน BookingManagementPage
+        window.dispatchEvent(new Event("refreshBookings"));
+      } else {
+        alert(data.message || "Failed to assign job");
+      }
+    } catch (error) {
+      console.error("Error assigning job:", error);
+      alert("Error assigning job");
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!assignmentForm.driver_id || !assignmentForm.vehicle_id) {
+      alert("Please select driver and vehicle");
+      return;
+    }
+
+    try {
+      setAssignLoading(true);
+
+      const response = await fetch("/api/assignments/assign.php", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignment_id: assignment.id,
+          ...assignmentForm,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert("Job reassigned successfully!");
+        setShowAssignModal(false);
+        fetchAssignment();
+        setAssignmentForm({ driver_id: "", vehicle_id: "", notes: "" });
+        window.dispatchEvent(new Event("refreshBookings"));
+      } else {
+        alert(data.message || "Failed to reassign job");
+      }
+    } catch (error) {
+      console.error("Error reassigning job:", error);
+      alert("Error reassigning job");
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const handleUnassign = async () => {
+    if (!confirm("Are you sure you want to unassign this job?")) return;
+
+    try {
+      const response = await fetch(
+        `/api/assignments/assign.php?id=${assignment.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert("Assignment removed successfully!");
+        setAssignment(null);
+        setShowAssignModal(false);
+      } else {
+        alert(data.message || "Failed to remove assignment");
+      }
+    } catch (error) {
+      console.error("Error removing assignment:", error);
+      alert("Error removing assignment");
+    }
+  };
+
+  const handleSelectDriver = (driver) => {
+    setAssignmentForm({
+      ...assignmentForm,
+      driver_id: driver.id,
+      vehicle_id: driver.default_vehicle_id || assignmentForm.vehicle_id,
+    });
+    setDriverSearchTerm(`${driver.name} (${driver.phone_number})`);
+    setShowDriverDropdown(false);
+  };
+
+  // Handle vehicle selection
+  const handleSelectVehicle = (vehicle) => {
+    setAssignmentForm({
+      ...assignmentForm,
+      vehicle_id: vehicle.id,
+    });
+    setVehicleSearchTerm(
+      `${vehicle.registration} - ${vehicle.brand} ${vehicle.model}`
+    );
+    setShowVehicleDropdown(false);
+  };
+
+  const openAssignModal = () => {
+    if (assignment) {
+      const driver = drivers.find((d) => d.id == assignment.driver_id);
+      const vehicle = vehicles.find((v) => v.id == assignment.vehicle_id);
+
+      setDriverSearchTerm(
+        driver ? `${driver.name} (${driver.phone_number})` : ""
+      );
+      setVehicleSearchTerm(
+        vehicle
+          ? `${vehicle.registration} - ${vehicle.brand} ${vehicle.model}`
+          : ""
+      );
+
+      setAssignmentForm({
+        driver_id: assignment.driver_id,
+        vehicle_id: assignment.vehicle_id,
+        notes: assignment.assignment_notes || "",
+      });
+    } else {
+      setDriverSearchTerm("");
+      setVehicleSearchTerm("");
+      setAssignmentForm({ driver_id: "", vehicle_id: "", notes: "" });
+    }
+
+    setShowDriverDropdown(false);
+    setShowVehicleDropdown(false);
+    setShowAssignModal(true);
+  };
 
   useEffect(() => {
     if (ref) {
       fetchBookingDetail();
+      fetchAssignment();
+      fetchDriversAndVehicles();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref]);
@@ -26,14 +260,11 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
       setLoading(true);
       setError(null);
 
-      // ดึง booking detail จาก database
       const response = await backendApi.getBookingDetailFromDB(ref);
 
       if (response.success) {
         setBookingDetail({ booking: response.data });
-        setBookingNotes(response.notes); // เก็บไว้เผื่อใช้
-
-        // ดึง notes จาก API แยกต่างหาก
+        setBookingNotes(response.notes);
         fetchNotesFromAPI();
       } else {
         throw new Error(response.error || "Failed to fetch booking detail");
@@ -52,7 +283,6 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
       const notesResponse = await backendApi.holidayTaxis.getBookingNotes(ref);
 
       if (notesResponse.success && notesResponse.data.notes) {
-        // แปลง notes จาก API เป็น text
         const apiNotesData = notesResponse.data.notes;
         if (apiNotesData.note_0) {
           const note = apiNotesData.note_0;
@@ -97,30 +327,6 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
     )}`;
   };
 
-  const extractNotesFromRawData = (rawData) => {
-    if (!rawData) return null;
-
-    try {
-      const parsed =
-        typeof rawData === "string" ? JSON.parse(rawData) : rawData;
-
-      // ลองหาจาก detail_data ก่อน
-      if (parsed.detail_data?.booking?.notes) {
-        return parsed.detail_data.booking.notes;
-      }
-
-      // ลองหาจาก search_data
-      if (parsed.search_data?.notes) {
-        return parsed.search_data.notes;
-      }
-
-      return null;
-    } catch (error) {
-      console.log("Error parsing raw data for notes:", error);
-      return null;
-    }
-  };
-
   const getReadableStatus = (status) => {
     const statusMap = {
       PCON: "Pending Confirmation",
@@ -133,40 +339,6 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
     return statusMap[status] || status;
   };
 
-  // Helper function to format notes from database
-  const formatNotes = (notesData, bookingNotesContent = null) => {
-    // ลองใช้ notes จาก booking.notes_content ก่อน (จาก Notes API)
-    if (bookingNotesContent) {
-      return bookingNotesContent;
-    }
-
-    // ถ้าไม่มีให้ใช้จาก booking_notes table
-    if (notesData && typeof notesData === "object") {
-      if (notesData.content) {
-        let noteText = notesData.content;
-
-        const flags = [];
-        if (notesData.flight_no_query) flags.push("Flight Query");
-        if (notesData.wrong_resort) flags.push("Wrong Resort");
-        if (notesData.mandatory_child_seat) flags.push("Child Seat Required");
-        if (notesData.missing_accommodation)
-          flags.push("Missing Accommodation");
-        if (notesData.no_show_arrival) flags.push("No Show Arrival");
-        if (notesData.no_show_departure) flags.push("No Show Departure");
-
-        if (flags.length > 0) {
-          noteText += `\n\nFlags: ${flags.join(", ")}`;
-        }
-
-        noteText += `\n\nLast updated: ${notesData.created_at || "-"}`;
-        return noteText;
-      }
-    }
-
-    return "No notes available";
-  };
-
-  // === Small presentational helpers (no icons) ===
   const Section = ({ title, children, right }) => (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -275,7 +447,6 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const arrival = booking?.arrival || {};
   const departure = booking?.departure || {};
 
-  // Status chip color
   const statusColor =
     general.status === "PCON"
       ? "bg-blue-100 text-blue-800"
@@ -293,6 +464,31 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
 
   return (
     <div className="space-y-6">
+      <style>{`
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: rgba(0, 0, 0, 0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+          padding: 1rem;
+        }
+        .modal-content {
+          background: white;
+          border-radius: 0.75rem;
+          max-width: 32rem;
+          width: 100%;
+          max-height: 90vh;
+          overflow-y: auto;
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+      `}</style>
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -317,6 +513,24 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
           >
             {getReadableStatus(general.status)}
           </span>
+
+          {/* Assignment Button */}
+          <button
+            onClick={openAssignModal}
+            className={`px-4 py-2 text-sm font-medium rounded-lg text-white ${
+              assignment
+                ? "bg-green-600 hover:bg-green-700"
+                : "bg-yellow-600 hover:bg-yellow-700"
+            }`}
+          >
+            <i
+              className={`fas ${
+                assignment ? "fa-user-check" : "fa-user-plus"
+              } mr-2`}
+            ></i>
+            {assignment ? "Assigned" : "Assign Job"}
+          </button>
+
           <button
             onClick={fetchBookingDetail}
             className={`px-4 py-2 text-sm font-medium rounded-lg ${getCompanyClass(
@@ -443,6 +657,192 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
             </div>
           )}
         </Section>
+      )}
+
+      {/* Assignment Modal */}
+      {showAssignModal && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setShowAssignModal(false);
+            setShowDriverDropdown(false);
+            setShowVehicleDropdown(false);
+          }}
+        >
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {assignment ? "Reassign Job" : "Assign Job"}
+              </h3>
+              <button
+                onClick={() => setShowAssignModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <i className="fas fa-times text-xl"></i>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {/* Show current assignment if exists */}
+              {assignment && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-blue-900 font-medium mb-2">
+                    Current Assignment:
+                  </p>
+                  <p className="text-sm text-blue-800">
+                    <i className="fas fa-user mr-2"></i>
+                    {assignment.driver_name}
+                  </p>
+                  <p className="text-sm text-blue-800">
+                    <i className="fas fa-car mr-2"></i>
+                    {assignment.registration} - {assignment.brand}{" "}
+                    {assignment.model}
+                  </p>
+                </div>
+              )}
+
+              {/* Driver Autocomplete */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Driver *
+                </label>
+
+                <input
+                  type="text"
+                  value={driverSearchTerm}
+                  onChange={(e) => {
+                    setDriverSearchTerm(e.target.value);
+                    setShowDriverDropdown(true);
+                  }}
+                  onFocus={() => setShowDriverDropdown(true)}
+                  placeholder="Type to search driver..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+
+                {/* Driver Dropdown */}
+                {showDriverDropdown && filteredDrivers.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {filteredDrivers.map((driver) => (
+                      <div
+                        key={driver.id}
+                        onClick={() => handleSelectDriver(driver)}
+                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="font-medium text-gray-900">
+                          {driver.name}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          {driver.phone_number}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Vehicle Autocomplete */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Vehicle *
+                </label>
+
+                <input
+                  type="text"
+                  value={vehicleSearchTerm}
+                  onChange={(e) => {
+                    setVehicleSearchTerm(e.target.value);
+                    setShowVehicleDropdown(true);
+                  }}
+                  onFocus={() => setShowVehicleDropdown(true)}
+                  placeholder="Type to search vehicle..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+
+                {/* Vehicle Dropdown */}
+                {showVehicleDropdown && filteredVehicles.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {filteredVehicles.map((vehicle) => (
+                      <div
+                        key={vehicle.id}
+                        onClick={() => handleSelectVehicle(vehicle)}
+                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="font-medium text-gray-900">
+                          {vehicle.registration}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          {vehicle.brand} {vehicle.model}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={assignmentForm.notes}
+                  onChange={(e) =>
+                    setAssignmentForm({
+                      ...assignmentForm,
+                      notes: e.target.value,
+                    })
+                  }
+                  rows="3"
+                  placeholder="Any special instructions for the driver..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
+              {assignment && (
+                <button
+                  onClick={handleUnassign}
+                  className="px-4 py-2 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-50"
+                >
+                  <i className="fas fa-times-circle mr-2"></i>
+                  Unassign
+                </button>
+              )}
+
+              <div className="flex gap-3 ml-auto">
+                <button
+                  onClick={() => setShowAssignModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={assignment ? handleReassign : handleAssignJob}
+                  disabled={assignLoading}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors ${getCompanyClass(
+                    "primary"
+                  )} ${getCompanyClass("primaryHover")} disabled:opacity-50`}
+                >
+                  {assignLoading ? (
+                    <>
+                      <i className="fas fa-spinner animate-spin mr-2"></i>
+                      {assignment ? "Reassigning..." : "Assigning..."}
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-check mr-2"></i>
+                      {assignment ? "Reassign Job" : "Assign Job"}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

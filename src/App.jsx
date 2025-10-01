@@ -186,6 +186,9 @@ function App() {
           value={{
             setSelectedBookingRef,
             setCurrentPage: handleSetCurrentPage,
+            refreshBookings: () => {
+              window.dispatchEvent(new Event("refreshBookings"));
+            },
           }}
         >
           {renderCurrentPage()}
