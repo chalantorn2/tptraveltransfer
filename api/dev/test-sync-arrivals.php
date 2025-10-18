@@ -1,12 +1,10 @@
 <?php
-// api/sync/holiday-taxis.php - Enhanced Sync with Individual Booking Details
+// api/dev/test-sync-arrivals.php - Test Sync using Arrivals API
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Max-Age: 86400');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-// Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
@@ -22,19 +20,21 @@ require_once '../config/database.php';
 require_once '../config/holiday-taxis.php';
 
 try {
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    $dateFrom = $input['dateFrom'] ?? null;
+    $dateTo = $input['dateTo'] ?? null;
+    $page = $input['page'] ?? 1;
+
+    if (!$dateFrom || !$dateTo) {
+        throw new Exception('dateFrom and dateTo are required');
+    }
+
     $db = new Database();
     $pdo = $db->getConnection();
 
-    // Parameters
-    $days = $_POST['days'] ?? 7;
-    $detailSync = $_POST['detail_sync'] ?? true; // Get individual booking details
-
-    // Calculate date range
-    $dateFrom = date('Y-m-d\TH:i:s', strtotime("-{$days} days"));
-    $dateTo = date('Y-m-d\TH:i:s');
-
-    // Step 1: Get bookings from Holiday Taxis search API
-    $searchUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/search/since/{$dateFrom}/until/{$dateTo}/page/1";
+    // Search by arrivals
+    $searchUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/search/arrivals/since/{$dateFrom}/until/{$dateTo}/page/{$page}";
 
     $headers = [
         "API_KEY: " . HolidayTaxisConfig::API_KEY,
@@ -55,8 +55,27 @@ try {
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
+    // Accept both 200 and 204
+    if ($httpCode === 204) {
+        // No content - no bookings found
+        echo json_encode([
+            'success' => true,
+            'data' => [
+                'totalFound' => 0,
+                'totalNew' => 0,
+                'totalUpdated' => 0,
+                'totalDetailed' => 0,
+                'dateRange' => [
+                    'from' => $dateFrom,
+                    'to' => $dateTo
+                ]
+            ]
+        ]);
+        exit;
+    }
+
     if ($httpCode !== 200) {
-        throw new Exception("Holiday Taxis Search API error: HTTP $httpCode");
+        throw new Exception("Holiday Taxis API error: HTTP $httpCode");
     }
 
     $searchData = json_decode($response, true);
@@ -64,7 +83,7 @@ try {
         throw new Exception('Invalid API response format');
     }
 
-    // Convert bookings object to array
+    // Convert bookings to array
     $bookingsData = $searchData['bookings'];
     if (is_object($bookingsData) || (is_array($bookingsData) && isset($bookingsData['booking_0']))) {
         $bookings = array_values((array)$bookingsData);
@@ -78,52 +97,40 @@ try {
     $totalDetailed = 0;
 
     foreach ($bookings as $booking) {
-        // Check if booking exists
+        // Check if exists
         $checkSql = "SELECT id FROM bookings WHERE booking_ref = :ref";
         $checkStmt = $pdo->prepare($checkSql);
         $checkStmt->execute([':ref' => $booking['ref']]);
         $exists = $checkStmt->fetch();
 
-        // Get detailed booking info if enabled
+        // Get detail
         $detailData = null;
-        if ($detailSync) {
-            $detailUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/{$booking['ref']}";
+        $detailUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/{$booking['ref']}";
 
-            $detailCh = curl_init();
-            curl_setopt_array($detailCh, [
-                CURLOPT_URL => $detailUrl,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 20
-            ]);
+        $detailCh = curl_init();
+        curl_setopt_array($detailCh, [
+            CURLOPT_URL => $detailUrl,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 20
+        ]);
 
-            $detailResponse = curl_exec($detailCh);
-            $detailHttpCode = curl_getinfo($detailCh, CURLINFO_HTTP_CODE);
-            curl_close($detailCh);
+        $detailResponse = curl_exec($detailCh);
+        $detailHttpCode = curl_getinfo($detailCh, CURLINFO_HTTP_CODE);
+        curl_close($detailCh);
 
-            if ($detailHttpCode === 200) {
-                $detailData = json_decode($detailResponse, true);
-                $totalDetailed++;
-            }
+        if ($detailHttpCode === 200) {
+            $detailData = json_decode($detailResponse, true);
+            $totalDetailed++;
         }
 
-        // Process dates from both search and detail data
-        $arrivalDate = null;
-        $departureDate = null;
+        // Process dates
+        $arrivalDate = $booking['arrivaldate'] ?? null;
+        $departureDate = $booking['departuredate'] ?? null;
         $pickupDate = null;
 
-        // From search data
-        if (!empty($booking['arrivaldate'])) {
-            $arrivalDate = $booking['arrivaldate'];
-        }
-        if (!empty($booking['departuredate'])) {
-            $departureDate = $booking['departuredate'];
-        }
-
-        // From detail data (more accurate)
         if ($detailData && isset($detailData['booking'])) {
             $bookingDetail = $detailData['booking'];
-
             if (isset($bookingDetail['arrival']['arrivaldate'])) {
                 $arrivalDate = $bookingDetail['arrival']['arrivaldate'];
             }
@@ -135,21 +142,19 @@ try {
             }
         }
 
-        // Determine pickup date if not set
         if (!$pickupDate) {
             $pickupDate = $departureDate ?: $arrivalDate;
         }
 
-        // Extract additional data from detail response
-        $passengerEmail = null;
+        // Extract additional data
         $bookingType = null;
+        $airport = null;
+        $airportCode = null;
+        $resort = null;
         $accommodationName = null;
         $accommodationAddress1 = null;
         $accommodationAddress2 = null;
         $accommodationTel = null;
-        $airport = null;
-        $airportCode = null;
-        $resort = null;
         $flightNoArrival = null;
         $flightNoDeparture = null;
 
@@ -173,7 +178,6 @@ try {
         if ($detailData && isset($detailData['booking']['departure'])) {
             $departure = $detailData['booking']['departure'];
             $flightNoDeparture = $departure['flightno'] ?? null;
-            // Use departure accommodation if arrival not available
             if (!$accommodationName) {
                 $accommodationName = $departure['accommodationname'] ?? null;
                 $accommodationAddress1 = $departure['accommodationaddress1'] ?? null;
@@ -182,7 +186,6 @@ try {
             }
         }
 
-        // Prepare combined raw data
         $combinedRawData = [
             'search_data' => $booking,
             'detail_data' => $detailData,
@@ -190,8 +193,8 @@ try {
         ];
 
         if ($exists) {
-            // Update existing booking
-            $updateSql = "UPDATE bookings SET 
+            // Update
+            $updateSql = "UPDATE bookings SET
                             ht_status = :status,
                             passenger_name = :passenger_name,
                             passenger_phone = :passenger_phone,
@@ -241,37 +244,12 @@ try {
                 ':raw_data' => json_encode($combinedRawData)
             ]);
 
-            // Update assignment status based on booking status
-            if ($booking['status'] === 'ACAN') {
-                // If booking is cancelled, update assignment to cancelled
-                $updateAssignmentSql = "UPDATE driver_vehicle_assignments
-                                       SET status = 'cancelled',
-                                           booking_status = :booking_status,
-                                           cancelled_at = NOW()
-                                       WHERE booking_ref = :ref";
-                $updateAssignmentStmt = $pdo->prepare($updateAssignmentSql);
-                $updateAssignmentStmt->execute([
-                    ':ref' => $booking['ref'],
-                    ':booking_status' => $booking['status']
-                ]);
-            } else {
-                // Update booking_status in assignment
-                $updateAssignmentStatusSql = "UPDATE driver_vehicle_assignments
-                                              SET booking_status = :booking_status
-                                              WHERE booking_ref = :ref";
-                $updateAssignmentStatusStmt = $pdo->prepare($updateAssignmentStatusSql);
-                $updateAssignmentStatusStmt->execute([
-                    ':ref' => $booking['ref'],
-                    ':booking_status' => $booking['status']
-                ]);
-            }
-
             $totalUpdated++;
         } else {
-            // Insert new booking
+            // Insert
             $insertSql = "INSERT INTO bookings (
                             booking_ref, ht_status, passenger_name, passenger_phone,
-                            pax_total, booking_type, vehicle_type, 
+                            pax_total, booking_type, vehicle_type,
                             airport, airport_code, resort,
                             accommodation_name, accommodation_address1, accommodation_address2, accommodation_tel,
                             arrival_date, departure_date, pickup_date,
@@ -316,27 +294,7 @@ try {
         }
     }
 
-    // Log sync status
-    $syncSql = "INSERT INTO sync_status (
-                    sync_type, date_from, date_to, 
-                    total_found, total_new, total_updated, 
-                    status, completed_at
-                ) VALUES (
-                    'manual', :date_from, :date_to,
-                    :total_found, :total_new, :total_updated,
-                    'completed', NOW()
-                )";
-
-    $syncStmt = $pdo->prepare($syncSql);
-    $syncStmt->execute([
-        ':date_from' => $dateFrom,
-        ':date_to' => $dateTo,
-        ':total_found' => $totalFound,
-        ':total_new' => $totalNew,
-        ':total_updated' => $totalUpdated
-    ]);
-
-    $response = [
+    echo json_encode([
         'success' => true,
         'data' => [
             'totalFound' => $totalFound,
@@ -346,13 +304,10 @@ try {
             'dateRange' => [
                 'from' => $dateFrom,
                 'to' => $dateTo
-            ],
-            'detailSync' => $detailSync,
-            'syncedAt' => date('Y-m-d H:i:s')
+            ]
         ]
-    ];
+    ]);
 
-    echo json_encode($response);
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode([

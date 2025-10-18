@@ -24,9 +24,11 @@ function BookingManagementPage() {
     status: "all",
     dateFrom: "",
     dateTo: "",
-    dateType: "pickup", // 'pickup' or 'arrival'
+    dateType: "pickup", // 'pickup' or 'sync'
     search: "",
     page: 1,
+    sortBy: "pickup", // 'pickup'
+    sortOrder: "asc", // 'asc' or 'desc'
   });
 
   // API call function
@@ -39,6 +41,8 @@ function BookingManagementPage() {
         limit: 20,
         status: searchFilters.status,
         date_type: searchFilters.dateType,
+        sort_by: searchFilters.sortBy,
+        sort_order: searchFilters.sortOrder,
       });
 
       if (searchFilters.dateFrom)
@@ -85,6 +89,13 @@ function BookingManagementPage() {
   // Handle pagination
   const handlePageChange = (page) => {
     const newFilters = { ...filters, page };
+    setFilters(newFilters);
+  };
+
+  // Handle sort toggle
+  const handleSortToggle = () => {
+    const newOrder = filters.sortOrder === "asc" ? "desc" : "asc";
+    const newFilters = { ...filters, sortOrder: newOrder, page: 1 };
     setFilters(newFilters);
   };
 
@@ -139,7 +150,12 @@ function BookingManagementPage() {
   const formatDateTime = (dateString) => {
     if (!dateString) return "-";
     const date = new Date(dateString);
-    return date.toLocaleDateString("en-GB");
+    const dateStr = date.toLocaleDateString("en-GB");
+    const timeStr = date.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${dateStr} ${timeStr}`;
   };
 
   const getReadableStatus = (status) => {
@@ -204,11 +220,24 @@ function BookingManagementPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             >
               <option value="all">All Status</option>
-              <option value="PCON">Pending Confirmation</option>
-              <option value="ACON">Confirmed</option>
-              <option value="ACAN">Cancelled</option>
-              <option value="PAMM">Pending Amendment</option>
-              <option value="AAMM">Amendment Approved</option>
+              <optgroup label="Booking Status">
+                <option value="PCON">Pending Confirmation</option>
+                <option value="ACON">Confirmed</option>
+                <option value="ACAN">Cancelled</option>
+                <option value="PAMM">Pending Amendment</option>
+                <option value="AAMM">Amendment Approved</option>
+              </optgroup>
+              <optgroup label="Assignment Status">
+                <option value="assignment:pending">Not Assigned</option>
+                <option value="assignment:assigned">Assigned</option>
+                <option value="assignment:active">Active Tracking</option>
+                <option value="assignment:completed">
+                  Assignment Completed
+                </option>
+                <option value="assignment:cancelled">
+                  Assignment Cancelled
+                </option>
+              </optgroup>
             </select>
           </div>
 
@@ -223,7 +252,7 @@ function BookingManagementPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             >
               <option value="pickup">Pickup Date</option>
-              <option value="arrival">Arrival Date</option>
+              <option value="sync">Sync Time</option>
             </select>
           </div>
 
@@ -324,10 +353,17 @@ function BookingManagementPage() {
                     Pax
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-700 border-b">
-                    Arrival
-                  </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-700 border-b">
-                    Pickup
+                    <button
+                      onClick={handleSortToggle}
+                      className="flex items-center space-x-2 hover:text-blue-600 transition-colors"
+                    >
+                      <span>Pickup Time</span>
+                      <i
+                        className={`fas fa-sort-${
+                          filters.sortOrder === "asc" ? "up" : "down"
+                        }`}
+                      ></i>
+                    </button>
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-700 border-b">
                     Vehicle
@@ -394,10 +430,7 @@ function BookingManagementPage() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
-                      {formatDate(booking.arrivalDate)}
-                    </td>
-                    <td className="py-3 px-4 text-sm text-gray-600">
-                      {formatDate(booking.pickupDate)}
+                      {formatDateTime(booking.pickupDate)}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <span className="text-sm text-gray-900">
@@ -405,15 +438,25 @@ function BookingManagementPage() {
                       </span>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      {booking.is_assigned ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          <i className="fas fa-check-circle mr-1.5"></i>
-                          Assigned
-                        </span>
-                      ) : (
+                      {!booking.is_assigned ? (
                         <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
                           <i className="fas fa-circle mr-1.5"></i>
                           Not Assigned
+                        </span>
+                      ) : booking.assignment_status === "completed" ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          <i className="fas fa-check-circle mr-1.5"></i>
+                          Completed
+                        </span>
+                      ) : booking.assignment_status === "cancelled" ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          <i className="fas fa-times-circle mr-1.5"></i>
+                          Cancelled
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          <i className="fas fa-user-check mr-1.5"></i>
+                          Assigned
                         </span>
                       )}
                     </td>

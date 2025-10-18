@@ -20,6 +20,10 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const [vehicleSearchTerm, setVehicleSearchTerm] = useState("");
   const [showDriverDropdown, setShowDriverDropdown] = useState(false);
   const [showVehicleDropdown, setShowVehicleDropdown] = useState(false);
+  const [trackingLink, setTrackingLink] = useState(null);
+  const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false);
+  const [messageCopied, setMessageCopied] = useState(false);
 
   const filteredDrivers = drivers.filter(
     (d) =>
@@ -95,6 +99,16 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const handleAssignJob = async () => {
     if (!assignmentForm.driver_id || !assignmentForm.vehicle_id) {
       alert("Please select driver and vehicle");
+      return;
+    }
+
+    // ตรวจสอบ booking status
+    const booking = bookingDetail?.booking;
+    const bookingStatus = booking?.general?.status;
+    if (bookingStatus !== "ACON") {
+      alert(
+        "Cannot assign job. Only confirmed bookings (ACON) can be assigned."
+      );
       return;
     }
 
@@ -185,12 +199,125 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
         alert("Assignment removed successfully!");
         setAssignment(null);
         setShowAssignModal(false);
+        setTrackingLink(null);
       } else {
         alert(data.message || "Failed to remove assignment");
       }
     } catch (error) {
       console.error("Error removing assignment:", error);
       alert("Error removing assignment");
+    }
+  };
+
+  const handleGenerateTrackingLink = async () => {
+    if (!assignment) {
+      alert("Please assign a job first");
+      return;
+    }
+
+    console.log("Generating tracking link with:", {
+      booking_ref: ref,
+      assignment_id: assignment.id,
+      assignment: assignment,
+    });
+
+    try {
+      setGeneratingLink(true);
+
+      const payload = {
+        booking_ref: ref,
+        assignment_id: assignment.id,
+      };
+
+      console.log("Sending payload:", payload);
+
+      const response = await fetch("/api/assignments/generate-link.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      console.log("API Response:", data);
+
+      if (data.success) {
+        setTrackingLink(data.data);
+        setMessageCopied(false); // Reset copy state when opening modal
+        setShowTrackingModal(true);
+      } else {
+        alert(data.message || "Failed to generate tracking link");
+      }
+    } catch (error) {
+      console.error("Error generating tracking link:", error);
+      alert("Error generating tracking link");
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (trackingLink?.tracking_url) {
+      navigator.clipboard.writeText(trackingLink.tracking_url);
+      alert("Link copied to clipboard!");
+    }
+  };
+
+  const generateDriverMessage = () => {
+    if (!trackingLink || !bookingDetail) return "";
+
+    const booking = bookingDetail.booking;
+    const general = booking?.general || {};
+    const arrival = booking?.arrival || {};
+    const departure = booking?.departure || {};
+
+    // กำหนดข้อมูลตาม booking type
+    const isArrival = general.bookingtype?.toLowerCase().includes("arrival");
+    const pickupDate = isArrival
+      ? arrival.arrivaldate
+      : departure.pickupdate || departure.departuredate;
+    const flightNo = isArrival ? arrival.flightno : departure.flightno;
+    const pickupLocation = isArrival
+      ? general.airport || "Airport"
+      : arrival.accommodationname || "Hotel";
+    const dropoffLocation = isArrival
+      ? arrival.accommodationname || "Hotel"
+      : general.airport || "Airport";
+
+    // นับจำนวนผู้โดยสาร
+    const passengers = [];
+    if (general.adults) passengers.push(`${general.adults} Adults`);
+    if (general.children) passengers.push(`${general.children} Children`);
+    if (general.infants) passengers.push(`${general.infants} Infants`);
+    const passengerCount = passengers.join(", ") || "N/A";
+
+    const message = `🚗 งานใหม่จาก TP Travel
+
+📋 Booking: ${ref}
+👤 ชื่อลูกค้า: ${general.passengername || "N/A"}
+👥 จำนวน: ${passengerCount}
+
+📅 วันที่รับ: ${formatDateTime(pickupDate)}
+${flightNo ? `✈️ เที่ยวบิน: ${flightNo}` : ""}
+📍 รับที่: ${pickupLocation}
+📍 ส่งที่: ${dropoffLocation}
+
+🔗 Tracking Link:
+${trackingLink.tracking_url}
+
+📱 วิธีใช้:
+1. คลิกลิงก์ด้านบน
+2. กด "เริ่มงาน"
+3. อนุญาตการเข้าถึง GPS
+4. เมื่อเสร็จงานให้กด "เสร็จสิ้นงาน"`;
+
+    return message;
+  };
+
+  const handleCopyMessage = () => {
+    const message = generateDriverMessage();
+    if (message) {
+      navigator.clipboard.writeText(message);
+      setMessageCopied(true);
     }
   };
 
@@ -517,11 +644,19 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
           {/* Assignment Button */}
           <button
             onClick={openAssignModal}
+            disabled={!assignment && general.status !== "ACON"}
             className={`px-4 py-2 text-sm font-medium rounded-lg text-white ${
               assignment
                 ? "bg-green-600 hover:bg-green-700"
-                : "bg-yellow-600 hover:bg-yellow-700"
-            }`}
+                : general.status === "ACON"
+                ? "bg-yellow-600 hover:bg-yellow-700"
+                : "bg-gray-400 cursor-not-allowed"
+            } disabled:opacity-50`}
+            title={
+              !assignment && general.status !== "ACON"
+                ? "Only confirmed bookings (ACON) can be assigned"
+                : ""
+            }
           >
             <i
               className={`fas ${
@@ -530,6 +665,27 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
             ></i>
             {assignment ? "Assigned" : "Assign Job"}
           </button>
+
+          {/* Generate Tracking Link Button */}
+          {assignment && (
+            <button
+              onClick={handleGenerateTrackingLink}
+              disabled={generatingLink}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
+            >
+              {generatingLink ? (
+                <>
+                  <i className="fas fa-spinner animate-spin mr-2"></i>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-link mr-2"></i>
+                  Tracking Link
+                </>
+              )}
+            </button>
+          )}
 
           <button
             onClick={fetchBookingDetail}
@@ -840,6 +996,129 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tracking Link Modal */}
+      {showTrackingModal && trackingLink && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setShowTrackingModal(false);
+            setMessageCopied(false); // Reset copy state when closing modal
+          }}
+        >
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                <i className="fas fa-link text-purple-600 mr-2"></i>
+                Driver Tracking Link
+              </h3>
+              <button
+                onClick={() => {
+                  setShowTrackingModal(false);
+                  setMessageCopied(false); // Reset copy state when closing modal
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <i className="fas fa-times text-xl"></i>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <i className="fas fa-check-circle text-green-600 text-xl mt-0.5"></i>
+                  <div>
+                    <p className="font-medium text-green-900">
+                      Tracking Link Generated!
+                    </p>
+                    <p className="text-sm text-green-700 mt-1">
+                      Send this link to the driver via LINE or WhatsApp
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Link Display */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tracking URL
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={trackingLink.tracking_url}
+                    readOnly
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm font-mono"
+                  />
+                  <button
+                    onClick={handleCopyLink}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2"
+                  >
+                    <i className="fas fa-copy"></i>
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              {/* Message for Driver */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm text-blue-900 font-medium">
+                    <i className="fas fa-comment-dots mr-2"></i>
+                    ข้อความสำหรับส่งให้คนขับ
+                  </p>
+                  <button
+                    onClick={handleCopyMessage}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                      messageCopied
+                        ? "bg-green-600 hover:bg-green-700 text-white"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    <i
+                      className={`fas ${
+                        messageCopied ? "fa-check" : "fa-copy"
+                      } mr-2`}
+                    ></i>
+                    {messageCopied ? "คัดลอกข้อความแล้ว" : "คัดลอกข้อความ"}
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-lg p-4 text-sm text-gray-800 whitespace-pre-line border border-blue-200 font-mono">
+                  {generateDriverMessage()}
+                </div>
+
+                <p className="text-xs text-blue-700 mt-3">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  คัดลอกข้อความนี้และส่งให้คนขับผ่าน LINE หรือ WhatsApp
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowTrackingModal(false);
+                  setMessageCopied(false); // Reset copy state when closing modal
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-white"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleCopyLink}
+                className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700"
+              >
+                <i className="fas fa-copy mr-2"></i>
+                Copy Link
+              </button>
             </div>
           </div>
         </div>

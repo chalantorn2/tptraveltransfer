@@ -10,6 +10,7 @@ import BookingOverviewPage from "./components/pages/BookingOverviewPage";
 import UserManagementPage from "./components/pages/UserManagementPage";
 import BookingDetailPage from "./components/pages/BookingDetailPage";
 import VehicleManagementPage from "./components/pages/VehicleManagementPage";
+import TestSyncPage from "./components/pages/TestSyncPage";
 import "./App.css";
 
 export const BookingContext = createContext();
@@ -128,7 +129,7 @@ function App() {
         return <DriverManagementPage />;
       case "vehicles":
         return <VehicleManagementPage />;
-      case "freelance":
+      case "assignments":
         return <FreelanceJobsPage />;
       case "booking":
         return <BookingOverviewPage />;
@@ -149,6 +150,8 @@ function App() {
             fromPage={selectedBookingRef?.fromPage || "dashboard"}
           />
         );
+      case "test-sync":
+        return <TestSyncPage />;
       default:
         return <DashboardPage />;
     }

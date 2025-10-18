@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"D:\\Freelance\\Web\\Holiday Taxi\\TP Travel\\tptraveltransfer\\api-testing\")",
+      "Bash(if not exist \"D:\\Freelance\\Web\\Holiday Taxi\\TP Travel\\tptraveltransfer\\api\\dev\" mkdir \"D:\\Freelance\\Web\\Holiday Taxi\\TP Travel\\tptraveltransfer\\api\\dev\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

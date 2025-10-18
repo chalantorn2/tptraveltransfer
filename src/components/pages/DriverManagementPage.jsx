@@ -42,6 +42,7 @@ function DriverManagementPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const formRef = useRef(null);
+  const [showAccountInfo, setShowAccountInfo] = useState(false);
 
   useEffect(() => {
     fetchDrivers();
@@ -69,14 +70,17 @@ function DriverManagementPage() {
     setError("");
     setSuccess("");
 
-    if (!editingDriver && formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
+    // Validate password only if it's provided
+    if (formData.password || formData.confirmPassword) {
+      if (formData.password !== formData.confirmPassword) {
+        setError("Passwords do not match");
+        return;
+      }
 
-    if (!editingDriver && formData.password.length < 6) {
-      setError("Password must be at least 6 characters");
-      return;
+      if (formData.password.length < 6) {
+        setError("Password must be at least 6 characters");
+        return;
+      }
     }
 
     try {
@@ -90,8 +94,13 @@ function DriverManagementPage() {
       const submitData = { ...formData };
       delete submitData.confirmPassword; // ไม่ส่ง confirmPassword ไป API
 
-      // Don't send password if editing and password is empty
-      if (editingDriver && !submitData.password) {
+      // Don't send username if empty
+      if (!submitData.username) {
+        delete submitData.username;
+      }
+
+      // Don't send password if empty
+      if (!submitData.password) {
         delete submitData.password;
       }
 
@@ -128,6 +137,8 @@ function DriverManagementPage() {
       status: driver.status,
     });
     setShowForm(true);
+    // Auto-expand Account Info if driver has username
+    setShowAccountInfo(!!driver.username);
 
     // Scroll ไปที่ฟอร์ม
     setTimeout(() => {
@@ -168,6 +179,7 @@ function DriverManagementPage() {
     });
     setEditingDriver(null);
     setShowForm(false);
+    setShowAccountInfo(false);
   };
 
   const handleContactMethodChange = (method, checked) => {
@@ -459,61 +471,74 @@ function DriverManagementPage() {
 
             {/* Account Information Section */}
             <div className="border-t border-gray-200 pt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
-                <i className="fas fa-key text-gray-400"></i>
-                Account Information
-              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAccountInfo(!showAccountInfo)}
+                className="flex items-center justify-between w-full text-left mb-4 hover:bg-gray-50 p-3 rounded-lg transition-colors"
+              >
+                <h3 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                  <i className="fas fa-key text-gray-400"></i>
+                  Account Information (Optional)
+                  <span className="text-xs font-normal text-gray-500">
+                    - สำหรับกรณีที่ต้องการให้คนขับล็อกอินเข้าระบบ
+                  </span>
+                </h3>
+                <i
+                  className={`fas fa-chevron-${
+                    showAccountInfo ? "up" : "down"
+                  } text-gray-400`}
+                ></i>
+              </button>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Username (สำหรับล็อกอิน) *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.username}
-                    onChange={(e) =>
-                      setFormData({ ...formData, username: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
+              {showAccountInfo && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Username (สำหรับล็อกอิน)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.username}
+                      onChange={(e) =>
+                        setFormData({ ...formData, username: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Password {editingDriver && "(เว้นว่างหากไม่ต้องการเปลี่ยน)"}
-                    {!editingDriver && " *"}
-                  </label>
-                  <input
-                    type="password"
-                    required={!editingDriver}
-                    value={formData.password}
-                    onChange={(e) =>
-                      setFormData({ ...formData, password: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Password{" "}
+                      {editingDriver && "(เว้นว่างหากไม่ต้องการเปลี่ยน)"}
+                    </label>
+                    <input
+                      type="password"
+                      value={formData.password}
+                      onChange={(e) =>
+                        setFormData({ ...formData, password: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Confirm Password {!editingDriver && " *"}
-                  </label>
-                  <input
-                    type="password"
-                    required={!editingDriver}
-                    value={formData.confirmPassword}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        confirmPassword: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Confirm Password
+                    </label>
+                    <input
+                      type="password"
+                      value={formData.confirmPassword}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          confirmPassword: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="flex gap-3 justify-between items-center">

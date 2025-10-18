@@ -27,9 +27,9 @@ const MENU_ITEMS = [
     roles: ["admin", "user"],
   },
   {
-    id: "freelance",
-    name: "Freelance Jobs",
-    icon: "fa-solid fa-id-card",
+    id: "assignments",
+    name: "Job Assignments",
+    icon: "fas fa-clipboard-list",
     roles: ["admin", "user"],
   },
   {
@@ -106,7 +106,7 @@ function MainLayout({ currentPage, setCurrentPage, children, user, onLogout }) {
                 <li key={item.id}>
                   <button
                     onClick={() => handlePageChange(item.id)}
-                    className={`w-full flex items-center cursor-pointer px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    className={`w-full flex items-center text-nowrap cursor-pointer px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
                       currentPage === item.id
                         ? `${getCompanyClass("primary")} text-white shadow-sm`
                         : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"

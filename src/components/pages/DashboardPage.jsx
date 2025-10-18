@@ -169,6 +169,13 @@ function DashboardPage() {
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-gray-600 mt-1">ภาพรวมงานทั้งหมดและสถิติประจำวัน</p>
         </div>
+        <button
+          onClick={() => setAppPage("test-sync")}
+          className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
+        >
+          <i className="fas fa-vial mr-2"></i>
+          Test Sync
+        </button>
       </div>
 
       {/* Stats Cards */}

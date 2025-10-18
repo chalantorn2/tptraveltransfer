@@ -23,6 +23,8 @@ try {
     $dateTo = $_GET['date_to'] ?? null;
     $dateType = $_GET['date_type'] ?? 'pickup';
     $search = trim($_GET['search'] ?? '');
+    $sortBy = $_GET['sort_by'] ?? 'pickup';
+    $sortOrder = strtoupper($_GET['sort_order'] ?? 'ASC');
 
     error_log("Search API Debug - Search term: '$search'");
 
@@ -30,32 +32,46 @@ try {
     $whereClause = "WHERE 1=1";
     $params = [];
 
-    // Status filter
+    // Status filter (supports both booking status and assignment status)
     if ($status !== 'all') {
-        $whereClause .= " AND b.ht_status = ?";
-        $params[] = $status;
+        if (strpos($status, 'assignment:') === 0) {
+            // Assignment status filter
+            $assignmentStatus = substr($status, 11); // Remove "assignment:" prefix
+            if ($assignmentStatus === 'pending') {
+                // Not assigned (no assignment record)
+                $whereClause .= " AND dva.id IS NULL";
+            } else {
+                // Has assignment with specific status
+                $whereClause .= " AND dva.status = ?";
+                $params[] = $assignmentStatus;
+            }
+        } else {
+            // Booking status filter
+            $whereClause .= " AND b.ht_status = ?";
+            $params[] = $status;
+        }
     }
 
     // Date range filter
     if ($dateFrom || $dateTo) {
         if ($dateFrom && $dateTo) {
-            if ($dateType === 'arrival') {
-                $whereClause .= " AND DATE(b.arrival_date) BETWEEN ? AND ?";
+            if ($dateType === 'sync') {
+                $whereClause .= " AND DATE(b.last_action_date) BETWEEN ? AND ?";
             } else {
                 $whereClause .= " AND DATE(b.pickup_date) BETWEEN ? AND ?";
             }
             $params[] = $dateFrom;
             $params[] = $dateTo;
         } elseif ($dateFrom) {
-            if ($dateType === 'arrival') {
-                $whereClause .= " AND DATE(b.arrival_date) = ?";
+            if ($dateType === 'sync') {
+                $whereClause .= " AND DATE(b.last_action_date) = ?";
             } else {
                 $whereClause .= " AND DATE(b.pickup_date) = ?";
             }
             $params[] = $dateFrom;
         } elseif ($dateTo) {
-            if ($dateType === 'arrival') {
-                $whereClause .= " AND DATE(b.arrival_date) = ?";
+            if ($dateType === 'sync') {
+                $whereClause .= " AND DATE(b.last_action_date) = ?";
             } else {
                 $whereClause .= " AND DATE(b.pickup_date) = ?";
             }
@@ -74,13 +90,27 @@ try {
     $isDefaultQuery = empty($search) && empty($dateFrom) && empty($dateTo) && $status === 'all';
     $maxDefaultResults = 100;
 
+    // Validate and sanitize sort parameters
+    $validSortBy = ['pickup'];
+    $validSortOrder = ['ASC', 'DESC'];
+
+    if (!in_array($sortBy, $validSortBy)) {
+        $sortBy = 'pickup';
+    }
+    if (!in_array($sortOrder, $validSortOrder)) {
+        $sortOrder = 'ASC';
+    }
+
+    // Build ORDER BY clause
+    $orderByClause = "ORDER BY b.pickup_date IS NULL, b.pickup_date $sortOrder, b.created_at DESC";
+
     // Get total count
     if ($isDefaultQuery) {
         $countSql = "SELECT COUNT(*) as total FROM (
             SELECT b.id FROM bookings b
             LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
-            $whereClause 
-            ORDER BY b.pickup_date IS NULL, b.pickup_date ASC, b.created_at DESC 
+            $whereClause
+            $orderByClause
             LIMIT $maxDefaultResults
         ) as limited_bookings";
         $countStmt = $pdo->prepare($countSql);
@@ -98,7 +128,7 @@ try {
     // Get paginated bookings
     if ($isDefaultQuery) {
         $sql = "SELECT * FROM (
-            SELECT 
+            SELECT
                 b.booking_ref,
                 b.ht_status,
                 b.passenger_name,
@@ -118,17 +148,18 @@ try {
                 b.last_action_date,
                 b.created_at,
                 b.raw_data,
-                CASE WHEN dva.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned
+                CASE WHEN dva.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned,
+                dva.status as assignment_status
             FROM bookings b
             LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
             $whereClause
-            ORDER BY b.pickup_date IS NULL, b.pickup_date ASC, b.created_at DESC
+            $orderByClause
             LIMIT $maxDefaultResults
         ) as limited_bookings
-        ORDER BY pickup_date IS NULL, pickup_date ASC, created_at DESC
+        ORDER BY pickup_date IS NULL, pickup_date $sortOrder, created_at DESC
         LIMIT ? OFFSET ?";
     } else {
-        $sql = "SELECT 
+        $sql = "SELECT
             b.booking_ref,
             b.ht_status,
             b.passenger_name,
@@ -148,11 +179,12 @@ try {
             b.last_action_date,
             b.created_at,
             b.raw_data,
-            CASE WHEN dva.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned
+            CASE WHEN dva.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned,
+            dva.status as assignment_status
         FROM bookings b
         LEFT JOIN driver_vehicle_assignments dva ON b.booking_ref = dva.booking_ref
         $whereClause
-        ORDER BY b.pickup_date IS NULL, b.pickup_date ASC, b.created_at DESC
+        $orderByClause
         LIMIT ? OFFSET ?";
     }
 
@@ -204,7 +236,8 @@ try {
             ],
             'lastActionDate' => $booking['last_action_date'],
             'createdAt' => $booking['created_at'],
-            'is_assigned' => (int)$booking['is_assigned']
+            'is_assigned' => (int)$booking['is_assigned'],
+            'assignment_status' => $booking['assignment_status'] ?? null
         ];
     }, $bookings);
 

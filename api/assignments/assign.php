@@ -78,6 +78,28 @@ try {
                 sendResponse(false, null, 'Booking ref, driver and vehicle required', 400);
             }
 
+            // ตรวจสอบ booking status - ต้องเป็น ACON (Confirmed) เท่านั้น
+            $bookingSql = "SELECT ht_status FROM bookings WHERE booking_ref = :ref";
+            $bookingStmt = $pdo->prepare($bookingSql);
+            $bookingStmt->execute([':ref' => $bookingRef]);
+            $booking = $bookingStmt->fetch();
+
+            if (!$booking) {
+                sendResponse(false, null, 'Booking not found', 404);
+            }
+
+            if ($booking['ht_status'] !== 'ACON') {
+                $statusMap = [
+                    'PCON' => 'Pending Confirmation',
+                    'ACAN' => 'Cancelled',
+                    'PCAN' => 'Pending Cancellation',
+                    'PAMM' => 'Pending Amendment',
+                    'AAMM' => 'Amendment Approved'
+                ];
+                $statusName = $statusMap[$booking['ht_status']] ?? $booking['ht_status'];
+                sendResponse(false, null, "Cannot assign job. Booking status is '{$statusName}'. Only confirmed bookings (ACON) can be assigned.", 400);
+            }
+
             // ตรวจสอบว่ามี assignment อยู่แล้วหรือไม่
             $checkSql = "SELECT id FROM driver_vehicle_assignments WHERE booking_ref = :ref";
             $checkStmt = $pdo->prepare($checkSql);
