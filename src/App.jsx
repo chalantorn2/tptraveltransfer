@@ -5,7 +5,7 @@ import LoginPage from "./components/pages/LoginPage";
 import DashboardPage from "./components/pages/DashboardPage";
 import BookingManagementPage from "./components/pages/BookingManagementPage";
 import DriverManagementPage from "./components/pages/DriverManagementPage";
-import FreelanceJobsPage from "./components/pages/FreelanceJobsPage";
+import JobAssignmentsPage from "./components/pages/JobAssignmentsPage";
 import BookingOverviewPage from "./components/pages/BookingOverviewPage";
 import UserManagementPage from "./components/pages/UserManagementPage";
 import BookingDetailPage from "./components/pages/BookingDetailPage";
@@ -79,6 +79,41 @@ function App() {
     setLoading(false);
   }, []);
 
+  // Handle URL hash navigation on mount and hash change
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+
+      // Parse hash: #booking/HBEDS-26581356?from=assignments
+      if (hash.startsWith('#booking/')) {
+        const hashWithoutPrefix = hash.replace('#booking/', '');
+        const [bookingRef, queryString] = hashWithoutPrefix.split('?');
+
+        // Parse query parameters
+        const params = new URLSearchParams(queryString);
+        const fromPage = params.get('from') || 'jobs'; // Default to jobs if not specified
+
+        if (bookingRef) {
+          setSelectedBookingRef({
+            ref: bookingRef,
+            fromPage: fromPage,
+          });
+          setCurrentPage("booking-detail");
+        }
+      }
+    };
+
+    // Handle initial hash on load
+    handleHashChange();
+
+    // Listen for hash changes
+    window.addEventListener('hashchange', handleHashChange);
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
+
   // Custom setCurrentPage that saves to localStorage
   const handleSetCurrentPage = (pageId) => {
     setCurrentPage(pageId);
@@ -130,7 +165,7 @@ function App() {
       case "vehicles":
         return <VehicleManagementPage />;
       case "assignments":
-        return <FreelanceJobsPage />;
+        return <JobAssignmentsPage />;
       case "booking":
         return <BookingOverviewPage />;
       case "usermanagement":

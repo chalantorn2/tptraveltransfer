@@ -29,6 +29,12 @@ export const COMPANY_CONFIGS = {
 
     // Holiday Taxis API Configuration
     api: {
+      key: "htscon_fd8a9d60c363c15e3be1ff427dac2e31f5ee1521eeac523fb7c655899acf414cb45135d7dcd81841",
+      endpoint: "https://suppliers.holidaytaxis.com",
+      version: "2025-01",
+    },
+
+    "api-test": {
       key: "htscon_40b5cf18a8c98dc9f01a7fb65806ed8aefdabfe7f6130dcd6bfbc91ab1fd4c4f79966d6ba1304650",
       endpoint: "https://suppliers.htxstaging.com",
       version: "2025-01",
@@ -42,7 +48,7 @@ export const COMPANY_CONFIGS = {
     info: {
       fullName: "TP Travel Company Limited",
       address: "",
-      phone: "",
+      phone: "+66937376128",
       email: "",
       website: "",
     },

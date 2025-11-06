@@ -23,6 +23,7 @@ try {
     $dateTo = $_GET['date_to'] ?? null;
     $dateType = $_GET['date_type'] ?? 'pickup';
     $search = trim($_GET['search'] ?? '');
+    $province = $_GET['province'] ?? 'all';
     $sortBy = $_GET['sort_by'] ?? 'pickup';
     $sortOrder = strtoupper($_GET['sort_order'] ?? 'ASC');
 
@@ -31,6 +32,33 @@ try {
     // Base WHERE clause
     $whereClause = "WHERE 1=1";
     $params = [];
+
+    // Always apply 3-day filter UNLESS user specifically searches by date
+    // This ensures we only show recent bookings by default
+    $apply3DayFilter = empty($dateFrom) && empty($dateTo) && empty($search);
+
+    if ($apply3DayFilter) {
+        $whereClause .= " AND (
+            (b.pickup_date > DATE_SUB(CURDATE(), INTERVAL 3 DAY) AND b.pickup_date IS NOT NULL AND b.pickup_date != '0000-00-00 00:00:00')
+            OR (b.arrival_date > DATE_SUB(CURDATE(), INTERVAL 3 DAY) AND b.arrival_date IS NOT NULL AND b.arrival_date != '0000-00-00 00:00:00')
+            OR (b.departure_date > DATE_SUB(CURDATE(), INTERVAL 3 DAY) AND b.departure_date IS NOT NULL AND b.departure_date != '0000-00-00 00:00:00')
+            OR (
+                (b.pickup_date IS NULL OR b.pickup_date = '0000-00-00 00:00:00')
+                AND (b.arrival_date IS NULL OR b.arrival_date = '0000-00-00 00:00:00')
+                AND (b.departure_date IS NULL OR b.departure_date = '0000-00-00 00:00:00')
+            )
+        )";
+        error_log("3-day filter applied: YES");
+    } else {
+        error_log("3-day filter applied: NO (user has date filter or search)");
+    }
+
+    // Check if this is still default query (for limiting max results)
+    $isDefaultQuery = empty($search) && empty($dateFrom) && empty($dateTo) &&
+        ($status === 'all' || $status === 'ACON') &&
+        $province === 'all';
+
+    error_log("isDefaultQuery: " . ($isDefaultQuery ? 'true' : 'false') . " | search: '$search' | dateFrom: '$dateFrom' | dateTo: '$dateTo' | status: '$status' | province: '$province'");
 
     // Status filter (supports both booking status and assignment status)
     if ($status !== 'all') {
@@ -57,25 +85,62 @@ try {
         if ($dateFrom && $dateTo) {
             if ($dateType === 'sync') {
                 $whereClause .= " AND DATE(b.last_action_date) BETWEEN ? AND ?";
+                $params[] = $dateFrom;
+                $params[] = $dateTo;
             } else {
-                $whereClause .= " AND DATE(b.pickup_date) BETWEEN ? AND ?";
+                // Check arrival_date, departure_date, or pickup_date
+                // Use >= and < for accurate date filtering (includes full day)
+                $dateToEnd = date('Y-m-d', strtotime($dateTo . ' +1 day'));
+                $whereClause .= " AND (
+                    (b.arrival_date >= ? AND b.arrival_date < ?)
+                    OR (b.departure_date >= ? AND b.departure_date < ?)
+                    OR (b.pickup_date >= ? AND b.pickup_date < ?)
+                )";
+                $params[] = $dateFrom . ' 00:00:00';
+                $params[] = $dateToEnd . ' 00:00:00';
+                $params[] = $dateFrom . ' 00:00:00';
+                $params[] = $dateToEnd . ' 00:00:00';
+                $params[] = $dateFrom . ' 00:00:00';
+                $params[] = $dateToEnd . ' 00:00:00';
             }
-            $params[] = $dateFrom;
-            $params[] = $dateTo;
         } elseif ($dateFrom) {
             if ($dateType === 'sync') {
                 $whereClause .= " AND DATE(b.last_action_date) = ?";
+                $params[] = $dateFrom;
             } else {
-                $whereClause .= " AND DATE(b.pickup_date) = ?";
+                // Use >= for single date (includes full day from 00:00:00)
+                $dateFromEnd = date('Y-m-d', strtotime($dateFrom . ' +1 day'));
+                $whereClause .= " AND (
+                    (b.arrival_date >= ? AND b.arrival_date < ?)
+                    OR (b.departure_date >= ? AND b.departure_date < ?)
+                    OR (b.pickup_date >= ? AND b.pickup_date < ?)
+                )";
+                $params[] = $dateFrom . ' 00:00:00';
+                $params[] = $dateFromEnd . ' 00:00:00';
+                $params[] = $dateFrom . ' 00:00:00';
+                $params[] = $dateFromEnd . ' 00:00:00';
+                $params[] = $dateFrom . ' 00:00:00';
+                $params[] = $dateFromEnd . ' 00:00:00';
             }
-            $params[] = $dateFrom;
         } elseif ($dateTo) {
             if ($dateType === 'sync') {
                 $whereClause .= " AND DATE(b.last_action_date) = ?";
+                $params[] = $dateTo;
             } else {
-                $whereClause .= " AND DATE(b.pickup_date) = ?";
+                // Use < for single date (includes full day until 23:59:59)
+                $dateToEnd = date('Y-m-d', strtotime($dateTo . ' +1 day'));
+                $whereClause .= " AND (
+                    (b.arrival_date >= ? AND b.arrival_date < ?)
+                    OR (b.departure_date >= ? AND b.departure_date < ?)
+                    OR (b.pickup_date >= ? AND b.pickup_date < ?)
+                )";
+                $params[] = $dateTo . ' 00:00:00';
+                $params[] = $dateToEnd . ' 00:00:00';
+                $params[] = $dateTo . ' 00:00:00';
+                $params[] = $dateToEnd . ' 00:00:00';
+                $params[] = $dateTo . ' 00:00:00';
+                $params[] = $dateToEnd . ' 00:00:00';
             }
-            $params[] = $dateTo;
         }
     }
 
@@ -87,7 +152,16 @@ try {
         $params[] = $searchParam;
     }
 
-    $isDefaultQuery = empty($search) && empty($dateFrom) && empty($dateTo) && $status === 'all';
+    // Province filter
+    if ($province !== 'all') {
+        if ($province === 'unknown' || $province === 'null') {
+            $whereClause .= " AND b.province IS NULL";
+        } else {
+            $whereClause .= " AND b.province = ?";
+            $params[] = $province;
+        }
+    }
+
     $maxDefaultResults = 100;
 
     // Validate and sanitize sort parameters
@@ -137,6 +211,9 @@ try {
                 b.adults,
                 b.children,
                 b.infants,
+                b.province,
+                b.province_source,
+                b.province_confidence,
                 b.booking_type,
                 b.vehicle_type,
                 b.airport,
@@ -145,6 +222,8 @@ try {
                 b.arrival_date,
                 b.departure_date,
                 b.pickup_date,
+                b.flight_no_arrival,
+                b.flight_no_departure,
                 b.last_action_date,
                 b.created_at,
                 b.raw_data,
@@ -168,6 +247,9 @@ try {
             b.adults,
             b.children,
             b.infants,
+            b.province,
+            b.province_source,
+            b.province_confidence,
             b.booking_type,
             b.vehicle_type,
             b.airport,
@@ -176,6 +258,8 @@ try {
             b.arrival_date,
             b.departure_date,
             b.pickup_date,
+            b.flight_no_arrival,
+            b.flight_no_departure,
             b.last_action_date,
             b.created_at,
             b.raw_data,
@@ -211,6 +295,14 @@ try {
             }
         }
 
+        // Check if booking is older than 3 days
+        $isOldBooking = false;
+        if ($booking['pickup_date'] && $booking['pickup_date'] !== '0000-00-00 00:00:00') {
+            $pickupDate = strtotime($booking['pickup_date']);
+            $threeDaysAgo = strtotime('-3 days');
+            $isOldBooking = $pickupDate < $threeDaysAgo;
+        }
+
         return [
             'ref' => $booking['booking_ref'],
             'status' => $booking['ht_status'],
@@ -226,9 +318,14 @@ try {
             ],
             'bookingType' => $booking['booking_type'] ?? 'N/A',
             'airport' => $booking['airport'] ?? 'N/A',
+            'province' => $booking['province'] ?? null,
+            'province_source' => $booking['province_source'] ?? 'unknown',
+            'province_confidence' => $booking['province_confidence'] ?? 'low',
             'arrivalDate' => ($booking['arrival_date'] && $booking['arrival_date'] !== '0000-00-00 00:00:00') ? $booking['arrival_date'] : null,
             'departureDate' => ($booking['departure_date'] && $booking['departure_date'] !== '0000-00-00 00:00:00') ? $booking['departure_date'] : null,
             'pickupDate' => ($booking['pickup_date'] && $booking['pickup_date'] !== '0000-00-00 00:00:00') ? $booking['pickup_date'] : null,
+            'flightNoArrival' => $booking['flight_no_arrival'] ?? null,
+            'flightNoDeparture' => $booking['flight_no_departure'] ?? null,
             'vehicle' => $booking['vehicle_type'] ?? $vehicle,
             'resort' => $booking['resort'] ?? 'N/A',
             'accommodation' => [
@@ -237,7 +334,8 @@ try {
             'lastActionDate' => $booking['last_action_date'],
             'createdAt' => $booking['created_at'],
             'is_assigned' => (int)$booking['is_assigned'],
-            'assignment_status' => $booking['assignment_status'] ?? null
+            'assignment_status' => $booking['assignment_status'] ?? null,
+            'is_old_booking' => $isOldBooking
         ];
     }, $bookings);
 
@@ -263,6 +361,7 @@ try {
                 'date_to' => $dateTo,
                 'date_type' => $dateType,
                 'search' => $search,
+                'province' => $province,
                 'limit' => (int)$limit
             ],
             'lastUpdate' => date('Y-m-d H:i:s')

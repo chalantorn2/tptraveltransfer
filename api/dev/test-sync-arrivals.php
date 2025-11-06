@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 require_once '../config/database.php';
 require_once '../config/holiday-taxis.php';
+require_once '../config/province-mapping.php';
 
 try {
     $input = json_decode(file_get_contents('php://input'), true);
@@ -33,14 +34,15 @@ try {
     $db = new Database();
     $pdo = $db->getConnection();
 
-    // Search by arrivals
-    $searchUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/search/arrivals/since/{$dateFrom}/until/{$dateTo}/page/{$page}";
+    // Use TEST API
+    $useTest = true;
+    $searchUrl = HolidayTaxisConfig::getApiEndpoint($useTest) . "/bookings/search/arrivals/since/{$dateFrom}/until/{$dateTo}/page/{$page}";
 
     $headers = [
-        "API_KEY: " . HolidayTaxisConfig::API_KEY,
+        "API_KEY: " . HolidayTaxisConfig::getApiKey($useTest),
         "Content-Type: application/json",
         "Accept: application/json",
-        "VERSION: " . HolidayTaxisConfig::API_VERSION
+        "VERSION: " . HolidayTaxisConfig::getApiVersion($useTest)
     ];
 
     $ch = curl_init();
@@ -91,21 +93,180 @@ try {
         $bookings = $bookingsData;
     }
 
-    $totalFound = count($bookings);
+    error_log("Test Sync - Arrivals Page 1: " . count($bookings) . " bookings");
+
+    // Pagination: Keep fetching until no more bookings
+    $page = 2;
+    $maxPages = 50; // Safety limit
+
+    while ($page <= $maxPages) {
+        $pageUrl = HolidayTaxisConfig::getApiEndpoint($useTest) . "/bookings/search/arrivals/since/{$dateFrom}/until/{$dateTo}/page/{$page}";
+
+        $chPage = curl_init();
+        curl_setopt_array($chPage, [
+            CURLOPT_URL => $pageUrl,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30
+        ]);
+
+        $pageResponse = curl_exec($chPage);
+        $pageHttpCode = curl_getinfo($chPage, CURLINFO_HTTP_CODE);
+        curl_close($chPage);
+
+        if ($pageHttpCode === 204) {
+            break;
+        }
+
+        if ($pageHttpCode === 200) {
+            $pageData = json_decode($pageResponse, true);
+            if ($pageData && isset($pageData['bookings'])) {
+                $pageBookingsData = $pageData['bookings'];
+                if (is_object($pageBookingsData) || (is_array($pageBookingsData) && isset($pageBookingsData['booking_0']))) {
+                    $pageBookings = array_values((array)$pageBookingsData);
+                } else {
+                    $pageBookings = $pageBookingsData;
+                }
+
+                $pageCount = count($pageBookings);
+                if ($pageCount === 0) {
+                    break;
+                }
+
+                error_log("Test Sync - Arrivals Page $page: " . $pageCount . " bookings");
+                $bookings = array_merge($bookings, $pageBookings);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+
+        $page++;
+        usleep(100000); // 0.1 second delay
+    }
+
+    error_log("Test Sync - Arrivals Total: " . count($bookings) . " bookings across " . ($page - 1) . " pages");
+
+    // === FETCH DEPARTURES ===
+    $departuresUrl = HolidayTaxisConfig::getApiEndpoint($useTest) . "/bookings/search/departures/since/{$dateFrom}/until/{$dateTo}/page/1";
+
+    $chDep = curl_init();
+    curl_setopt_array($chDep, [
+        CURLOPT_URL => $departuresUrl,
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30
+    ]);
+
+    $responseDep = curl_exec($chDep);
+    $httpCodeDep = curl_getinfo($chDep, CURLINFO_HTTP_CODE);
+    curl_close($chDep);
+
+    $departureBookings = [];
+
+    if ($httpCodeDep === 200) {
+        $searchDataDep = json_decode($responseDep, true);
+        if ($searchDataDep && isset($searchDataDep['bookings'])) {
+            $bookingsDataDep = $searchDataDep['bookings'];
+            if (is_object($bookingsDataDep) || (is_array($bookingsDataDep) && isset($bookingsDataDep['booking_0']))) {
+                $departureBookings = array_values((array)$bookingsDataDep);
+            } else {
+                $departureBookings = $bookingsDataDep;
+            }
+
+            error_log("Test Sync - Departures Page 1: " . count($departureBookings) . " bookings");
+
+            // Pagination for departures
+            $page = 2;
+            while ($page <= $maxPages) {
+                $pageUrlDep = HolidayTaxisConfig::getApiEndpoint($useTest) . "/bookings/search/departures/since/{$dateFrom}/until/{$dateTo}/page/{$page}";
+
+                $chPageDep = curl_init();
+                curl_setopt_array($chPageDep, [
+                    CURLOPT_URL => $pageUrlDep,
+                    CURLOPT_HTTPHEADER => $headers,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 30
+                ]);
+
+                $pageResponseDep = curl_exec($chPageDep);
+                $pageHttpCodeDep = curl_getinfo($chPageDep, CURLINFO_HTTP_CODE);
+                curl_close($chPageDep);
+
+                if ($pageHttpCodeDep === 204) {
+                    break;
+                }
+
+                if ($pageHttpCodeDep === 200) {
+                    $pageDataDep = json_decode($pageResponseDep, true);
+                    if ($pageDataDep && isset($pageDataDep['bookings'])) {
+                        $pageBookingsDataDep = $pageDataDep['bookings'];
+                        if (is_object($pageBookingsDataDep) || (is_array($pageBookingsDataDep) && isset($pageBookingsDataDep['booking_0']))) {
+                            $pageBookingsDep = array_values((array)$pageBookingsDataDep);
+                        } else {
+                            $pageBookingsDep = $pageBookingsDataDep;
+                        }
+
+                        $pageCountDep = count($pageBookingsDep);
+                        if ($pageCountDep === 0) {
+                            break;
+                        }
+
+                        error_log("Test Sync - Departures Page $page: " . $pageCountDep . " bookings");
+                        $departureBookings = array_merge($departureBookings, $pageBookingsDep);
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+
+                $page++;
+                usleep(100000);
+            }
+
+            error_log("Test Sync - Departures Total: " . count($departureBookings) . " bookings");
+        }
+    } elseif ($httpCodeDep === 204) {
+        error_log("Test Sync - Departures: No bookings found (204)");
+    }
+
+    // Merge arrivals and departures
+    $allBookings = array_merge($bookings, $departureBookings);
+
+    // Remove duplicates
+    $uniqueBookings = [];
+    $seenRefs = [];
+    foreach ($allBookings as $booking) {
+        $ref = $booking['ref'] ?? '';
+        if ($ref && !isset($seenRefs[$ref])) {
+            $uniqueBookings[] = $booking;
+            $seenRefs[$ref] = true;
+        }
+    }
+
+    error_log("Test Sync - Combined: Arrivals=" . count($bookings) . ", Departures=" . count($departureBookings) . ", Total=" . count($allBookings) . ", Unique=" . count($uniqueBookings));
+
+    $totalFound = count($uniqueBookings);
     $totalNew = 0;
     $totalUpdated = 0;
     $totalDetailed = 0;
 
-    foreach ($bookings as $booking) {
+    foreach ($uniqueBookings as $booking) {
+        // Add "Test-" prefix to booking ref to distinguish from production bookings
+        $originalRef = $booking['ref'];
+        $testRef = 'Test-' . $originalRef;
+
         // Check if exists
         $checkSql = "SELECT id FROM bookings WHERE booking_ref = :ref";
         $checkStmt = $pdo->prepare($checkSql);
-        $checkStmt->execute([':ref' => $booking['ref']]);
+        $checkStmt->execute([':ref' => $testRef]);
         $exists = $checkStmt->fetch();
 
-        // Get detail
+        // Get detail (use original ref for API call)
         $detailData = null;
-        $detailUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/{$booking['ref']}";
+        $detailUrl = HolidayTaxisConfig::getApiEndpoint($useTest) . "/bookings/{$originalRef}";
 
         $detailCh = curl_init();
         curl_setopt_array($detailCh, [
@@ -186,14 +347,24 @@ try {
             }
         }
 
+        // Detect province
+        $provinceData = ProvinceMapping::detectProvince([
+            'airport' => $airport,
+            'airport_code' => $airportCode,
+            'accommodation_address1' => $accommodationAddress1,
+            'accommodation_address2' => $accommodationAddress2
+        ]);
+
         $combinedRawData = [
             'search_data' => $booking,
             'detail_data' => $detailData,
-            'sync_timestamp' => date('Y-m-d H:i:s')
+            'sync_timestamp' => date('Y-m-d H:i:s'),
+            'is_test' => true,
+            'original_ref' => $originalRef
         ];
 
         if ($exists) {
-            // Update
+            // Update - ไม่อัพเดท province เพราะอาจถูกแก้ไข manual แล้ว
             $updateSql = "UPDATE bookings SET
                             ht_status = :status,
                             passenger_name = :passenger_name,
@@ -221,7 +392,7 @@ try {
 
             $updateStmt = $pdo->prepare($updateSql);
             $updateStmt->execute([
-                ':ref' => $booking['ref'],
+                ':ref' => $testRef,
                 ':status' => $booking['status'],
                 ':passenger_name' => $booking['passengername'] ?? null,
                 ':passenger_phone' => $booking['passengertelno'] ?? null,
@@ -246,7 +417,7 @@ try {
 
             $totalUpdated++;
         } else {
-            // Insert
+            // Insert - มีการตรวจจับ province ตั้งแต่ตอนเพิ่ม booking ใหม่
             $insertSql = "INSERT INTO bookings (
                             booking_ref, ht_status, passenger_name, passenger_phone,
                             pax_total, booking_type, vehicle_type,
@@ -254,6 +425,7 @@ try {
                             accommodation_name, accommodation_address1, accommodation_address2, accommodation_tel,
                             arrival_date, departure_date, pickup_date,
                             flight_no_arrival, flight_no_departure,
+                            province, province_source, province_confidence,
                             last_action_date, raw_data, synced_at
                           ) VALUES (
                             :ref, :status, :passenger_name, :passenger_phone,
@@ -262,12 +434,13 @@ try {
                             :accommodation_name, :accommodation_address1, :accommodation_address2, :accommodation_tel,
                             :arrival_date, :departure_date, :pickup_date,
                             :flight_no_arrival, :flight_no_departure,
+                            :province, :province_source, :province_confidence,
                             :last_action_date, :raw_data, NOW()
                           )";
 
             $insertStmt = $pdo->prepare($insertSql);
             $insertStmt->execute([
-                ':ref' => $booking['ref'],
+                ':ref' => $testRef,
                 ':status' => $booking['status'],
                 ':passenger_name' => $booking['passengername'] ?? null,
                 ':passenger_phone' => $booking['passengertelno'] ?? null,
@@ -286,6 +459,9 @@ try {
                 ':pickup_date' => $pickupDate,
                 ':flight_no_arrival' => $flightNoArrival,
                 ':flight_no_departure' => $flightNoDeparture,
+                ':province' => $provinceData['province'],
+                ':province_source' => $provinceData['source'],
+                ':province_confidence' => $provinceData['confidence'],
                 ':last_action_date' => $booking['lastactiondate'] ?? date('Y-m-d H:i:s'),
                 ':raw_data' => json_encode($combinedRawData)
             ]);

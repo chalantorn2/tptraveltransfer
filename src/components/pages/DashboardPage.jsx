@@ -1,4 +1,4 @@
-// src/components/pages/DashboardPage.jsx - Original UI with Enhanced Backend
+// src/components/pages/DashboardPage.jsx - Practical Dashboard
 import { useState, useEffect, useContext } from "react";
 import { getCompanyClass } from "../../config/company";
 import { backendApi } from "../../services/backendApi";
@@ -7,83 +7,20 @@ import { BookingContext } from "../../App";
 function DashboardPage() {
   const { setSelectedBookingRef, setCurrentPage: setAppPage } =
     useContext(BookingContext);
-  const [bookingStats, setBookingStats] = useState({
-    newBookings: 0,
-    confirmed: 0,
-    cancelled: 0,
-    amendments: 0,
-  });
-  const [recentJobs, setRecentJobs] = useState([]);
+
+  const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
-
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pagination, setPagination] = useState({
-    current_page: 1,
-    total_pages: 1,
-    total_records: 0,
-    per_page: 10,
-    has_next: false,
-    has_prev: false,
-  });
-
   const [syncLoading, setSyncLoading] = useState(false);
 
-  // ฟังก์ชันดึงข้อมูลจาก Enhanced Backend แต่ fallback ถ้าไม่ได้
-  const fetchDashboardData = async (page = 1) => {
+  // Fetch practical dashboard data
+  const fetchDashboardData = async () => {
     try {
       setLoading(true);
+      const response = await backendApi.getPracticalDashboardData();
 
-      // Try enhanced dashboard first
-      const enhancedResponse = await backendApi.getEnhancedDashboardData();
-
-      if (enhancedResponse.success && enhancedResponse.data) {
-        // Use enhanced data
-        const data = enhancedResponse.data;
-
-        if (data.stats && data.stats.stats) {
-          setBookingStats(data.stats.stats);
-        }
-
-        if (data.recent_bookings) {
-          setRecentJobs(data.recent_bookings);
-          // Create pagination from enhanced data
-          setPagination({
-            current_page: 1,
-            total_pages: 1,
-            total_records: data.recent_bookings.length,
-            per_page: data.recent_bookings.length,
-            has_next: false,
-            has_prev: false,
-          });
-          setCurrentPage(1);
-        }
-
-        if (data.last_sync) {
-          setLastUpdate(new Date(data.last_sync));
-        } else {
-          setLastUpdate(new Date()); // fallback ถ้าไม่มี
-        }
-        return;
+      if (response.success) {
+        setDashboardData(response.data);
       }
-
-      // Fallback to original APIs
-      const [statsResponse, jobsResponse] = await Promise.all([
-        backendApi.getDashboardStats(),
-        backendApi.getRecentJobs(10, "all", page),
-      ]);
-
-      if (statsResponse.success) {
-        setBookingStats(statsResponse.data.stats);
-      }
-
-      if (jobsResponse.success) {
-        setRecentJobs(jobsResponse.data.bookings);
-        setPagination(jobsResponse.data.pagination);
-        setCurrentPage(page);
-      }
-
-      setLastUpdate(new Date());
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
     } finally {
@@ -91,21 +28,17 @@ function DashboardPage() {
     }
   };
 
-  // ฟังก์ชัน Sync & Refresh
+  // Handle Sync & Refresh
   const handleSyncAndRefresh = async () => {
     try {
       setSyncLoading(true);
+      const enhancedResponse = await backendApi.getEnhancedDashboardData(true);
 
-      // 1. Sync จาก Holiday Taxis
-      const syncResponse = await backendApi.syncHolidayTaxis(7, true);
-
-      // 2. ดึงข้อมูลใหม่จาก Database
-      if (syncResponse.success) {
-        await fetchDashboardData(currentPage);
-        // ลบ alert ออก - ไม่แสดงอะไร
+      if (enhancedResponse.success) {
+        // After sync, refresh dashboard data
+        await fetchDashboardData();
       } else {
-        // เก็บแค่ error alert
-        alert(`Sync failed: ${syncResponse.error}`);
+        alert(`Sync failed: ${enhancedResponse.error}`);
       }
     } catch (error) {
       console.error("Sync error:", error);
@@ -115,51 +48,72 @@ function DashboardPage() {
     }
   };
 
-  // formatDate function แก้
-  const formatDate = (dateString) => {
-    if (!dateString || dateString === "0000-00-00 00:00:00") return "-";
-    return new Date(dateString).toLocaleDateString("en-GB");
-  };
-
-  // Helper function to format datetime
+  // Helper functions
   const formatDateTime = (dateString) => {
     if (!dateString) return "-";
     const date = new Date(dateString);
     return `${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString(
       "en-GB",
-      {
-        hour: "2-digit",
-        minute: "2-digit",
-      }
+      { hour: "2-digit", minute: "2-digit" }
     )}`;
   };
 
-  // Helper function to get readable status
-  const getReadableStatus = (status) => {
+  const formatDate = (dateString) => {
+    if (!dateString || dateString === "0000-00-00 00:00:00") return "-";
+    return new Date(dateString).toLocaleDateString("en-GB");
+  };
+
+  const getStatusBadge = (status) => {
     const statusMap = {
-      PCON: "Pending Confirmation",
-      ACON: "Confirmed",
-      PCAN: "Pending Cancellation",
-      ACAN: "Cancelled",
-      PAMM: "Pending Amendment",
-      AAMM: "Amendment Approved",
+      PCON: { label: "Pending", color: "bg-blue-100 text-blue-800" },
+      ACON: { label: "Confirmed", color: "bg-green-100 text-green-800" },
+      PCAN: { label: "Cancel Req.", color: "bg-orange-100 text-orange-800" },
+      ACAN: { label: "Cancelled", color: "bg-red-100 text-red-800" },
+      PAMM: { label: "Amend Req.", color: "bg-yellow-100 text-yellow-800" },
+      AAMM: { label: "Amended", color: "bg-purple-100 text-purple-800" },
     };
-    return statusMap[status] || status;
+    const s = statusMap[status] || {
+      label: status,
+      color: "bg-gray-100 text-gray-800",
+    };
+    return (
+      <span className={`px-2 py-1 text-xs font-medium rounded-full ${s.color}`}>
+        {s.label}
+      </span>
+    );
   };
 
-  // Helper function to clean vehicle name
-  const cleanVehicleName = (vehicle) => {
-    if (!vehicle || vehicle === "-") return "-";
-    return vehicle
-      .replace(/^Private\s+/, "")
-      .replace(/^Shared\s+/, "")
-      .trim();
+  const getUrgencyBadge = (urgency) => {
+    const urgencyMap = {
+      urgent: { label: "⚠️ URGENT", color: "bg-red-500 text-white" },
+      today: { label: "Today", color: "bg-blue-500 text-white" },
+      normal: { label: "Normal", color: "bg-blue-500 text-white" },
+    };
+    const u = urgencyMap[urgency] || urgencyMap.normal;
+    return (
+      <span className={`px-2 py-1 text-xs font-bold rounded ${u.color}`}>
+        {u.label}
+      </span>
+    );
   };
 
-  // แค่โหลดข้อมูลจาก DB เฉยๆ
   useEffect(() => {
-    fetchDashboardData(); // โหลดครั้งแรกเฉยๆ ไม่ sync
+    fetchDashboardData();
+    // Auto refresh every 5 minutes
+    const interval = setInterval(fetchDashboardData, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -167,7 +121,7 @@ function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">ภาพรวมงานทั้งหมดและสถิติประจำวัน</p>
+          <p className="text-gray-600 mt-1">ภาพรวมงานและข้อมูลสำคัญ</p>
         </div>
         <button
           onClick={() => setAppPage("test-sync")}
@@ -178,37 +132,42 @@ function DashboardPage() {
         </button>
       </div>
 
-      {/* Stats Cards */}
+      {/* Quick Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
           {
-            title: "New Bookings / จองใหม่",
-            count: loading ? "..." : bookingStats.newBookings,
-            icon: "fas fa-plus-circle",
+            title: "Today's Pickups",
+            count: dashboardData?.overview?.today_pickups || 0,
+            icon: "fas fa-calendar-day",
+            color: "blue",
+          },
+
+          {
+            title: "Active Tracking",
+            count: dashboardData?.overview?.active_tracking || 0,
+            icon: "fas fa-route",
+            color: "blue",
+          },
+
+          {
+            title: "Completed Today",
+            count: dashboardData?.overview?.completed_today || 0,
+            icon: "fas fa-check-circle",
             color: "blue",
           },
           {
-            title: "Confirmed / ยืนยันแล้ว",
-            count: loading ? "..." : bookingStats.confirmed,
-            icon: "fas fa-check-circle",
-            color: "green",
-          },
-          {
-            title: "Cancelled / ยกเลิก",
-            count: loading ? "..." : bookingStats.cancelled,
-            icon: "fas fa-times-circle",
-            color: "red",
-          },
-          {
-            title: "Amendments / แก้ไข",
-            count: loading ? "..." : bookingStats.amendments,
-            icon: "fas fa-edit",
-            color: "yellow",
+            title: "Tomorrow's Pickups",
+            count: dashboardData?.overview?.tomorrow_pickups || 0,
+            icon: "fas fa-calendar-plus",
+            color: "blue",
           },
         ].map((stat, index) => (
           <div
             key={index}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+            className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow ${
+              stat.clickable ? "cursor-pointer" : ""
+            }`}
+            onClick={stat.onClick}
           >
             <div className="flex items-center justify-between">
               <div className="flex-1">
@@ -218,32 +177,27 @@ function DashboardPage() {
                 <p className="text-2xl font-semibold text-gray-900 mt-1">
                   {stat.count}
                 </p>
-                <div className="flex items-center mt-2">
-                  <span className="text-xs text-gray-500">
-                    อัปเดต: {lastUpdate.toLocaleTimeString("th-TH")}
-                  </span>
-                </div>
               </div>
               <div
                 className={`w-12 h-12 rounded-lg flex items-center justify-center ${
                   stat.color === "blue"
                     ? "bg-blue-50"
-                    : stat.color === "yellow"
-                    ? "bg-yellow-50"
-                    : stat.color === "red"
-                    ? "bg-red-50"
-                    : "bg-green-50"
+                    : stat.color === "green"
+                    ? "bg-green-50"
+                    : stat.color === "orange"
+                    ? "bg-orange-50"
+                    : "bg-purple-50"
                 }`}
               >
                 <i
                   className={`${stat.icon} text-lg ${
                     stat.color === "blue"
                       ? "text-blue-600"
-                      : stat.color === "yellow"
-                      ? "text-yellow-600"
-                      : stat.color === "red"
-                      ? "text-red-600"
-                      : "text-green-600"
+                      : stat.color === "green"
+                      ? "text-green-600"
+                      : stat.color === "orange"
+                      ? "text-orange-600"
+                      : "text-purple-600"
                   }`}
                 ></i>
               </div>
@@ -252,9 +206,124 @@ function DashboardPage() {
         ))}
       </div>
 
-      {/* Recent Jobs */}
+      {/* Issues Alert */}
+      {dashboardData?.issues?.total > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+          <div className="flex items-start space-x-3">
+            <i className="fas fa-exclamation-triangle text-yellow-600 text-xl mt-0.5"></i>
+            <div className="flex-1">
+              <h3 className="font-semibold text-yellow-900">
+                ⚠️ Issues Found ({dashboardData.issues.total})
+              </h3>
+              <ul className="text-sm text-yellow-800 mt-2 space-y-1">
+                {dashboardData.issues.missing_province > 0 && (
+                  <li>
+                    • {dashboardData.issues.missing_province} bookings missing
+                    province
+                  </li>
+                )}
+                {dashboardData.issues.missing_flight > 0 && (
+                  <li>
+                    • {dashboardData.issues.missing_flight} airport transfers
+                    missing flight info
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Critical Jobs - Need Immediate Action */}
+      {dashboardData?.critical_jobs?.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-red-200">
+          <div className="px-6 py-4 bg-red-50 border-b border-red-200 rounded-t-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <i className="fas fa-exclamation-circle text-red-600"></i>
+                <h2 className="text-lg font-semibold text-red-900">
+                  🚨 Critical Jobs - Need Assignment
+                </h2>
+                <span className="bg-red-600 text-white px-2 py-0.5 rounded-full text-xs font-bold">
+                  {dashboardData.critical_jobs.length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6">
+            <div className="overflow-x-auto">
+              <table className="w-full text-nowrap">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Urgency
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Booking Ref
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Pickup Time
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Passenger
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Province
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Vehicle
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardData.critical_jobs.map((job, index) => (
+                    <tr
+                      key={index}
+                      className={`border-b border-gray-100 hover:bg-gray-50 ${
+                        job.urgency === "urgent" ? "bg-red-50" : ""
+                      }`}
+                    >
+                      <td className="py-3 px-4">
+                        {getUrgencyBadge(job.urgency)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <button
+                          className="text-blue-600 hover:text-blue-800 font-medium hover:underline"
+                          onClick={() => {
+                            setSelectedBookingRef({
+                              ref: job.ref,
+                              fromPage: "dashboard",
+                            });
+                            setAppPage("booking-detail");
+                          }}
+                        >
+                          {job.ref}
+                        </button>
+                      </td>
+                      <td className="py-3 px-4 text-sm font-medium text-gray-900">
+                        {formatDateTime(job.pickup_date)}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {job.passenger} ({job.pax} pax)
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {job.province}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {job.vehicle}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Upcoming Bookings */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -265,8 +334,10 @@ function DashboardPage() {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-500">
-                Last synced: {lastUpdate.toLocaleTimeString("en-GB")} (
-                {lastUpdate.toLocaleDateString("en-GB")})
+                Last synced:{" "}
+                {dashboardData?.last_sync
+                  ? formatDateTime(dashboardData.last_sync)
+                  : "-"}
               </span>
               <button
                 onClick={handleSyncAndRefresh}
@@ -284,31 +355,15 @@ function DashboardPage() {
           </div>
         </div>
 
-        {/* Content */}
         <div className="p-6">
-          {loading ? (
+          {dashboardData?.recent_bookings?.length === 0 ? (
             <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i className="fas fa-spinner animate-spin text-2xl text-gray-400"></i>
-              </div>
-              <p className="text-gray-500 font-medium">Loading data...</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Fetching data from database...
-              </p>
-            </div>
-          ) : recentJobs.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i className="fas fa-database text-2xl text-gray-400"></i>
-              </div>
-              <p className="text-gray-500 font-medium">No data in database</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Data will sync automatically every hour
-              </p>
+              <i className="fas fa-inbox text-4xl text-gray-300 mb-4"></i>
+              <p className="text-gray-500">No upcoming bookings</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-nowrap">
                 <thead>
                   <tr className="border-b border-gray-200">
                     <th className="text-left py-3 px-4 font-medium text-gray-700">
@@ -318,126 +373,62 @@ function DashboardPage() {
                       Status
                     </th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700">
+                      Pickup Time
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">
                       Passenger
                     </th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700">
-                      Pickup Date
+                      Province
                     </th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700">
-                      Vehicle
-                    </th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">
-                      Sync Time
+                      Synced At
                     </th>
                   </tr>
                 </thead>
-
                 <tbody>
-                  {recentJobs.map((job, index) => (
+                  {dashboardData?.recent_bookings?.map((booking, index) => (
                     <tr
                       key={index}
                       className="border-b border-gray-100 hover:bg-gray-50"
                     >
                       <td className="py-3 px-4">
                         <button
-                          className="text-blue-600 hover:text-blue-800 font-medium cursor-pointer hover:underline"
+                          className="text-blue-600 hover:text-blue-800 font-medium hover:underline"
                           onClick={() => {
                             setSelectedBookingRef({
-                              ref: job.ref,
+                              ref: booking.ref,
                               fromPage: "dashboard",
                             });
                             setAppPage("booking-detail");
                           }}
                         >
-                          {job.ref}
+                          {booking.ref}
                         </button>
                       </td>
                       <td className="py-3 px-4">
-                        <span
-                          className={`px-2 py-1 text-xs font-medium  rounded-full  ${
-                            job.status === "PCON"
-                              ? "bg-blue-100 text-blue-800"
-                              : job.status === "ACON"
-                              ? "bg-green-100 text-green-800"
-                              : job.status === "PCAN"
-                              ? "bg-orange-100 text-orange-800"
-                              : job.status === "ACAN"
-                              ? "bg-red-100 text-red-800"
-                              : job.status === "PAMM"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : job.status === "AAMM"
-                              ? "bg-purple-100 text-purple-800"
-                              : "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          {getReadableStatus(job.status)}
-                        </span>
+                        {getStatusBadge(booking.status)}
                       </td>
-                      <td className="py-3 px-4">
-                        <p className="font-normal text-gray-900">
-                          {job.passenger?.name || "-"}
-                        </p>
+                      <td className="py-3 px-4 text-sm font-medium text-gray-900">
+                        {formatDateTime(booking.pickup_date)}
                       </td>
-                      <td className="py-3 px-4 text-sm font-normal text-gray-600">
-                        {formatDate(job.pickupDate)}
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {booking.passenger} ({booking.pax} pax)
                       </td>
-                      <td className="py-3 px-4">
-                        <p className="text-sm font-normal text-gray-900">
-                          {cleanVehicleName(job.vehicle)}
-                        </p>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {booking.province}
                       </td>
-                      <td className="py-3 px-4 text-sm font-normal text-gray-600">
-                        {formatDateTime(job.createdAt || job.updatedAt)}
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {formatDateTime(booking.synced_at)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              {/* Table Footer */}
               <div className="mt-4 text-center text-sm text-gray-500">
-                Showing {recentJobs.length} bookings | Auto-sync every hour
+                Showing {dashboardData?.recent_bookings?.length || 0} bookings
               </div>
-              {pagination.total_pages > 1 && (
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="text-sm text-gray-500">
-                    Showing {(currentPage - 1) * 10 + 1} to{" "}
-                    {Math.min(currentPage * 10, pagination.total_records)} of{" "}
-                    {pagination.total_records} bookings
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => fetchDashboardData(currentPage - 1)}
-                      disabled={!pagination.has_prev}
-                      className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Previous
-                    </button>
-
-                    {[...Array(pagination.total_pages)].map((_, index) => (
-                      <button
-                        key={index + 1}
-                        onClick={() => fetchDashboardData(index + 1)}
-                        className={`px-3 py-1 text-sm border rounded ${
-                          currentPage === index + 1
-                            ? "bg-blue-500 text-white"
-                            : "hover:bg-gray-50"
-                        }`}
-                      >
-                        {index + 1}
-                      </button>
-                    ))}
-
-                    <button
-                      onClick={() => fetchDashboardData(currentPage + 1)}
-                      disabled={!pagination.has_next}
-                      className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>

@@ -32,17 +32,15 @@ function DriverManagementPage() {
     name: "",
     phone_number: "+66",
     preferred_contact_method: "VOICE",
-    contact_methods: [],
+    contact_methods: ["VOICE"],
     license_number: "",
-    username: "",
-    password: "",
-    confirmPassword: "",
+    code: "",
     status: "active",
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const formRef = useRef(null);
-  const [showAccountInfo, setShowAccountInfo] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     fetchDrivers();
@@ -70,15 +68,27 @@ function DriverManagementPage() {
     setError("");
     setSuccess("");
 
-    // Validate password only if it's provided
-    if (formData.password || formData.confirmPassword) {
-      if (formData.password !== formData.confirmPassword) {
-        setError("Passwords do not match");
-        return;
-      }
+    // Trim all string fields
+    const trimmedData = {
+      ...formData,
+      name: formData.name?.trim() || "",
+      phone_number: formData.phone_number?.trim() || "",
+      license_number: formData.license_number?.trim() || "",
+      code: formData.code?.trim() || "",
+    };
 
-      if (formData.password.length < 6) {
-        setError("Password must be at least 6 characters");
+    console.log("Form data before validation:", trimmedData);
+
+    // Validate required fields for creating new driver (only name and phone)
+    if (!editingDriver) {
+      const missingFields = [];
+      if (!trimmedData.name) missingFields.push("Name");
+      if (!trimmedData.phone_number || trimmedData.phone_number === "+66")
+        missingFields.push("Phone number");
+
+      if (missingFields.length > 0) {
+        setError(`Please fill in: ${missingFields.join(", ")}`);
+        console.log("Missing fields:", missingFields);
         return;
       }
     }
@@ -91,18 +101,9 @@ function DriverManagementPage() {
       const method = editingDriver ? "PUT" : "POST";
 
       // Prepare data
-      const submitData = { ...formData };
-      delete submitData.confirmPassword; // ไม่ส่ง confirmPassword ไป API
+      const submitData = { ...trimmedData };
 
-      // Don't send username if empty
-      if (!submitData.username) {
-        delete submitData.username;
-      }
-
-      // Don't send password if empty
-      if (!submitData.password) {
-        delete submitData.password;
-      }
+      console.log("Sending to API:", { endpoint, method, data: submitData });
 
       const result = await apiCall(endpoint, {
         method,
@@ -131,14 +132,10 @@ function DriverManagementPage() {
       preferred_contact_method: driver.preferred_contact_method,
       contact_methods: driver.contact_methods || ["VOICE"],
       license_number: driver.license_number || "",
-      username: driver.username || "",
-      password: "", // เว้นว่างเสมอ
-      confirmPassword: "", // เว้นว่างเสมอ
+      code: driver.code || "",
       status: driver.status,
     });
     setShowForm(true);
-    // Auto-expand Account Info if driver has username
-    setShowAccountInfo(!!driver.username);
 
     // Scroll ไปที่ฟอร์ม
     setTimeout(() => {
@@ -156,6 +153,13 @@ function DriverManagementPage() {
 
       if (result.success) {
         setSuccess("Driver deleted successfully");
+
+        // ปิดฟอร์มถ้ากำลังแก้ไข driver ที่ถูกลบ
+        if (editingDriver && editingDriver.id === driverId) {
+          resetForm();
+        }
+
+        // รีเฟรชรายการ driver
         fetchDrivers();
       } else {
         setError(result.message || "Failed to delete driver");
@@ -172,14 +176,11 @@ function DriverManagementPage() {
       preferred_contact_method: "VOICE",
       contact_methods: ["VOICE"],
       license_number: "",
-      username: "",
-      password: "",
-      confirmPassword: "",
+      code: "",
       status: "active",
     });
     setEditingDriver(null);
     setShowForm(false);
-    setShowAccountInfo(false);
   };
 
   const handleContactMethodChange = (method, checked) => {
@@ -228,6 +229,19 @@ function DriverManagementPage() {
     return icons[method] || "fas fa-phone";
   };
 
+  // Filter drivers based on search query
+  const filteredDrivers = drivers.filter((driver) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      driver.name?.toLowerCase().includes(query) ||
+      driver.phone_number?.toLowerCase().includes(query) ||
+      driver.code?.toLowerCase().includes(query) ||
+      driver.license_number?.toLowerCase().includes(query) ||
+      driver.default_vehicle_registration?.toLowerCase().includes(query)
+    );
+  });
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -272,24 +286,25 @@ function DriverManagementPage() {
       {showForm && (
         <div
           ref={formRef}
-          className="bg-white rounded-xl shadow-sm border border-gray-200 p-6"
+          className="bg-white rounded-xl shadow-sm border border-blue-600 p-4"
         >
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-900">
               {editingDriver ? "แก้ไขข้อมูลคนขับ" : "เพิ่มคนขับใหม่"}
             </h2>
             <button
               onClick={resetForm}
               className="text-gray-400 hover:text-gray-600"
             >
-              <i className="fas fa-times text-xl"></i>
+              <i className="fas fa-times text-lg"></i>
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* ข้อมูลพื้นฐาน - 4 คอลัมน์ */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   ชื่อ-นามสกุล *
                 </label>
                 <input
@@ -299,16 +314,16 @@ function DriverManagementPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   เบอร์มือถือ *
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2 text-gray-500 font-medium">
+                  <span className="absolute left-3 top-1.5 text-sm text-gray-500 font-medium">
                     +66
                   </span>
                   <input
@@ -326,16 +341,28 @@ function DriverManagementPage() {
                         });
                       }
                     }}
-                    className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full pl-12 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  กรอกเฉพาะตัวเลข 9 หลัก (ไม่ต้องใส่ 0 หน้า)
-                </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  รหัสคนขับ (Code)
+                </label>
+                <input
+                  type="text"
+                  value={formData.code}
+                  onChange={(e) =>
+                    setFormData({ ...formData, code: e.target.value })
+                  }
+                  placeholder="เช่น: DRV001"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   เลขที่ใบขับขี่
                 </label>
                 <input
@@ -344,13 +371,16 @@ function DriverManagementPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, license_number: e.target.value })
                   }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
+            </div>
 
-              {editingDriver && (
+            {/* สถานะ - แถวที่ 2 (แสดงเฉพาะตอน Edit) */}
+            {editingDriver && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     สถานะ
                   </label>
                   <select
@@ -358,29 +388,30 @@ function DriverManagementPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, status: e.target.value })
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="active">ใช้งานอยู่</option>
                     <option value="inactive">ไม่ใช้งาน</option>
                   </select>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            <div className="space-y-6">
+            {/* วิธีติดต่อ - 1 แถว */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* วิธีติดต่อหลัก */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   วิธีติดต่อหลัก
-                  <span className="text-xs text-gray-500 block font-normal">
-                    ลูกค้าจะเห็นช่องทางนี้ก่อน
+                  <span className="text-xs text-gray-500 ml-1 font-normal">
+                    (ลูกค้าจะเห็นช่องทางนี้ก่อน)
                   </span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   {["VOICE", "SMS", "WHATSAPP"].map((method) => (
                     <label
                       key={method}
-                      className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
+                      className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
                     >
                       <input
                         type="radio"
@@ -411,20 +442,20 @@ function DriverManagementPage() {
 
               {/* วิธีติดต่อสำรอง */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   วิธีติดต่อสำรอง
-                  <span className="text-xs text-gray-500 block font-normal">
-                    ช่องทางเพิ่มเติมที่คนขับรับได้
+                  <span className="text-xs text-gray-500 ml-1 font-normal">
+                    (ช่องทางเพิ่มเติมที่คนขับรับได้)
                   </span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   {["VOICE", "SMS", "WHATSAPP"].map((method) => {
                     const isPreferred =
                       method === formData.preferred_contact_method;
                     return (
                       <label
                         key={method}
-                        className={`flex items-center space-x-3 p-3 border rounded-lg cursor-pointer ${
+                        className={`flex items-center space-x-2 p-2 border rounded-lg cursor-pointer ${
                           isPreferred
                             ? "border-blue-300 bg-blue-50"
                             : "border-gray-200 hover:bg-gray-50"
@@ -456,11 +487,6 @@ function DriverManagementPage() {
                             : method === "SMS"
                             ? "SMS"
                             : "WhatsApp"}
-                          {isPreferred && (
-                            <span className="text-xs text-blue-600 block">
-                              หลัก
-                            </span>
-                          )}
                         </span>
                       </label>
                     );
@@ -469,84 +495,12 @@ function DriverManagementPage() {
               </div>
             </div>
 
-            {/* Account Information Section */}
-            <div className="border-t border-gray-200 pt-6">
-              <button
-                type="button"
-                onClick={() => setShowAccountInfo(!showAccountInfo)}
-                className="flex items-center justify-between w-full text-left mb-4 hover:bg-gray-50 p-3 rounded-lg transition-colors"
-              >
-                <h3 className="text-lg font-medium text-gray-900 flex items-center gap-2">
-                  <i className="fas fa-key text-gray-400"></i>
-                  Account Information (Optional)
-                  <span className="text-xs font-normal text-gray-500">
-                    - สำหรับกรณีที่ต้องการให้คนขับล็อกอินเข้าระบบ
-                  </span>
-                </h3>
-                <i
-                  className={`fas fa-chevron-${
-                    showAccountInfo ? "up" : "down"
-                  } text-gray-400`}
-                ></i>
-              </button>
-
-              {showAccountInfo && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Username (สำหรับล็อกอิน)
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.username}
-                      onChange={(e) =>
-                        setFormData({ ...formData, username: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Password{" "}
-                      {editingDriver && "(เว้นว่างหากไม่ต้องการเปลี่ยน)"}
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.password}
-                      onChange={(e) =>
-                        setFormData({ ...formData, password: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Confirm Password
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.confirmPassword}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          confirmPassword: e.target.value,
-                        })
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 justify-between items-center">
+            <div className="flex gap-2 justify-between items-center">
               {/* ปุ่มซ้าย: Save & Cancel */}
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   type="submit"
-                  className={`px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors ${getCompanyClass(
+                  className={`px-3 py-1.5 text-sm font-medium rounded-lg text-white transition-colors ${getCompanyClass(
                     "primary"
                   )} ${getCompanyClass("primaryHover")}`}
                 >
@@ -555,7 +509,7 @@ function DriverManagementPage() {
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  className="px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
                   ยกเลิก
                 </button>
@@ -566,9 +520,9 @@ function DriverManagementPage() {
                 <button
                   type="button"
                   onClick={() => handleDelete(editingDriver.id)}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors flex items-center gap-2"
+                  className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors flex items-center gap-2"
                 >
-                  <i className="fas fa-trash"></i>
+                  <i className="fas fa-trash text-sm"></i>
                   ลบคนขับ
                 </button>
               )}
@@ -577,8 +531,33 @@ function DriverManagementPage() {
         </div>
       )}
 
-      {/* Drivers Grid */}
-      <div>
+      {/* Search Bar */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 relative">
+          <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+          <input
+            type="text"
+            placeholder="ค้นหาชื่อ, เบอร์โทร, เลขใบขับขี่, ทะเบียนรถ..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          )}
+        </div>
+        <div className="text-sm text-gray-500">
+          {filteredDrivers.length} / {drivers.length} คน
+        </div>
+      </div>
+
+      {/* Drivers Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         {loading ? (
           <div className="text-center py-12">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -596,125 +575,153 @@ function DriverManagementPage() {
               Add your first driver to get started
             </p>
           </div>
+        ) : filteredDrivers.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="fas fa-search text-2xl text-gray-400"></i>
+            </div>
+            <p className="text-gray-500 font-medium">ไม่พบคนขับที่ค้นหา</p>
+            <p className="text-sm text-gray-400 mt-1">ลองค้นหาด้วยคำอื่น</p>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {drivers.map((driver) => (
-              <div
-                key={driver.id}
-                className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-all"
-              >
-                {/* Header: Avatar + Name + Status + Actions */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 text-white flex items-center justify-center text-sm font-semibold shrink-0">
-                      <i className="fas fa-user text-white text-sm" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-medium text-gray-900 truncate">
-                          {driver.name}
-                        </h3>
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                            driver.status === "active"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-gray-100 text-gray-600"
-                          }`}
-                          title={
-                            driver.status === "active" ? "Active" : "Inactive"
-                          }
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              driver.status === "active"
-                                ? "bg-green-500"
-                                : "bg-gray-400"
-                            }`}
-                          />
-                          {driver.status === "active" ? "Active" : "Inactive"}
-                        </span>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b  border-gray-200">
+                <tr>
+                  <th className="px-4 py-6 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16"></th>
+                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                    Code
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Driver
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Phone
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    License
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Vehicle
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Joined
+                  </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredDrivers.map((driver, index) => (
+                  <tr
+                    key={driver.id}
+                    className="hover:bg-gray-50 transition-colors"
+                  >
+                    {/* Row Number */}
+                    <td className="px-4 py-2 whitespace-nowrap text-center">
+                      <div className="text-sm font-medium text-gray-500">
+                        {index + 1}
                       </div>
-                      <div className="text-sm text-gray-600 truncate">
+                    </td>
+
+                    {/* Driver Code */}
+                    <td className="px-4 py-2 whitespace-nowrap text-center">
+                      <div className="text-sm text-blue-600 font-medium">
+                        {driver.code || "-"}
+                      </div>
+                    </td>
+
+                    {/* Driver Name */}
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <div
+                        className="text-sm font-medium text-gray-900"
+                        title={driver.name}
+                      >
+                        {driver.name.length > 20
+                          ? driver.name.substring(0, 20) + "..."
+                          : driver.name}
+                      </div>
+                    </td>
+
+                    {/* Phone */}
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
                         {driver.phone_number}
                       </div>
-                    </div>
-                  </div>
+                    </td>
 
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => handleEdit(driver)}
-                      className="p-2 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                      title="Edit"
-                    >
-                      <i className="fas fa-edit text-sm" />
-                    </button>
-                  </div>
-                </div>
+                    {/* License */}
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {driver.license_number || "-"}
+                      </div>
+                    </td>
 
-                {/* Body: compact chips row */}
-                <div className="mt-3 space-y-2">
-                  {/* Contact methods */}
-                  {driver.contact_methods?.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {driver.contact_methods.map((method) => {
-                        const isPreferred =
-                          method === driver.preferred_contact_method;
-                        return (
-                          <span
-                            key={method}
-                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[12px] font-medium ${
-                              isPreferred
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-gray-100 text-gray-600"
-                            }`}
-                            title={isPreferred ? "Preferred" : "Secondary"}
-                          >
-                            <i
-                              className={`${getContactMethodIcon(
-                                method
-                              )} text-[12px]`}
-                            />
-                            {method === "VOICE" ? "Voice" : method}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                    {/* Vehicle */}
+                    <td className="px-4 py-2">
+                      {driver.default_vehicle_registration ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">
+                            {driver.default_vehicle_registration}
+                          </div>
+                          {(driver.default_vehicle_brand ||
+                            driver.default_vehicle_model) && (
+                            <div className="text-gray-500 text-xs">
+                              {driver.default_vehicle_brand}{" "}
+                              {driver.default_vehicle_model}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">-</span>
+                      )}
+                    </td>
 
-                  {/* License & Vehicle */}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {driver.license_number && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-50 text-gray-700 text-[12px]">
-                        <i className="fas fa-id-card text-[12px]" />
-                        {driver.license_number}
+                    {/* Status */}
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                          driver.status === "active"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            driver.status === "active"
+                              ? "bg-green-500"
+                              : "bg-gray-400"
+                          }`}
+                        />
+                        {driver.status === "active" ? "Active" : "Inactive"}
                       </span>
-                    )}
-                    {driver.default_vehicle_registration && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-50 text-gray-700 text-[12px]">
-                        <i className="fas fa-car-side text-[12px]" />
-                        {driver.default_vehicle_registration}
-                        {driver.default_vehicle_brand ||
-                        driver.default_vehicle_model ? (
-                          <span className="text-gray-500">
-                            ({driver.default_vehicle_brand}{" "}
-                            {driver.default_vehicle_model})
-                          </span>
-                        ) : null}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                    </td>
 
-                {/* Footer */}
-                <div className="mt-3 pt-2 border-t border-gray-100">
-                  <div className="flex items-center justify-end">
-                    <span className="text-xs text-gray-500">
-                      Joined {formatDate(driver.created_at)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
+                    {/* Joined Date */}
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <div className="text-sm text-gray-500">
+                        {formatDate(driver.created_at)}
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-4 py-2 whitespace-nowrap text-right">
+                      <button
+                        onClick={() => handleEdit(driver)}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200"
+                      >
+                        <i className="fas fa-edit text-sm" />
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

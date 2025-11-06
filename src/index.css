@@ -13,6 +13,17 @@
     @apply antialiased;
   }
 
+  /* Cursor pointer for interactive elements */
+  button,
+  [onclick],
+  [role="button"],
+  label[for],
+  input[type="radio"],
+  input[type="checkbox"],
+  select {
+    cursor: pointer;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     width: 6px;

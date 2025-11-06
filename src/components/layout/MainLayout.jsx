@@ -15,6 +15,12 @@ const MENU_ITEMS = [
     roles: ["admin", "user"],
   },
   {
+    id: "assignments",
+    name: "Job Assignments",
+    icon: "fas fa-clipboard-list",
+    roles: ["admin", "user"],
+  },
+  {
     id: "drivers",
     name: "Driver Management",
     icon: "fas fa-user-tie",
@@ -26,12 +32,7 @@ const MENU_ITEMS = [
     icon: "fas fa-car-side",
     roles: ["admin", "user"],
   },
-  {
-    id: "assignments",
-    name: "Job Assignments",
-    icon: "fas fa-clipboard-list",
-    roles: ["admin", "user"],
-  },
+
   {
     id: "booking",
     name: "Booking Overview",
@@ -61,7 +62,7 @@ function MainLayout({ currentPage, setCurrentPage, children, user, onLogout }) {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className={`${getCompanyClass("primary")} text-white shadow-sm`}>
+      <header className={`${getCompanyClass("primary")} text-white shadow-sm print:hidden`}>
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-4">
@@ -99,7 +100,7 @@ function MainLayout({ currentPage, setCurrentPage, children, user, onLogout }) {
 
       <div className="flex">
         {/* Sidebar Navigation */}
-        <nav className="w-64 bg-white border-r border-gray-200 h-screen sticky top-0">
+        <nav className="w-64 bg-white border-r border-gray-200 h-screen sticky top-0 print:hidden">
           <div className="p-6">
             <ul className="space-y-1">
               {visibleMenuItems.map((item) => (

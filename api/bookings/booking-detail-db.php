@@ -76,7 +76,24 @@ try {
                     'flightno' => $booking['flight_no_departure'],
                     'toairport' => $booking['to_airport']
                 ],
-                // เพิ่มส่วนนี้
+                'quote' => [
+                    'transferdate' => $booking['transfer_date'],
+                    'pickupaddress1' => $booking['pickup_address1'],
+                    'pickupaddress2' => $booking['pickup_address2'],
+                    'pickupaddress3' => $booking['pickup_address3'],
+                    'pickupaddress4' => $booking['pickup_address4'],
+                    'dropoffaddress1' => $booking['dropoff_address1'],
+                    'dropoffaddress2' => $booking['dropoff_address2'],
+                    'dropoffaddress3' => $booking['dropoff_address3'],
+                    'dropoffaddress4' => $booking['dropoff_address4']
+                ],
+                // Province information
+                'province' => $booking['province'],
+                'province_source' => $booking['province_source'],
+                'province_confidence' => $booking['province_confidence'],
+                // Adjusted pickup date (if time was changed)
+                'pickup_date_adjusted' => $booking['pickup_date_adjusted'],
+                // Raw data
                 'raw_data' => $booking['raw_data'] ? json_decode($booking['raw_data'], true) : null
             ],
             'notes' => $notes ? [

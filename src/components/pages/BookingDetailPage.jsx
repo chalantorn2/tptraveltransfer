@@ -1,8 +1,9 @@
 // src/components/pages/BookingDetailPage.jsx
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import { backendApi } from "../../services/backendApi";
 import { getCompanyClass } from "../../config/company";
 import { BookingContext } from "../../App";
+import EditProvinceModal from "../modals/EditProvinceModal";
 
 function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const [bookingDetail, setBookingDetail] = useState(null);
@@ -25,19 +26,43 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
 
+  // Province edit state
+  const [showEditProvinceModal, setShowEditProvinceModal] = useState(false);
+
+  // Refs for click outside detection
+  const driverDropdownRef = useRef(null);
+  const vehicleDropdownRef = useRef(null);
+  const [provinces, setProvinces] = useState([]);
+
+  // Direction swap state (manual override)
+  const [isDirectionSwapped, setIsDirectionSwapped] = useState(false);
+
+  // Accordion state
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+
+  const ref = bookingRef?.ref || bookingRef;
+
+  // Load direction swap state from localStorage
+  useEffect(() => {
+    if (ref) {
+      const saved = localStorage.getItem(`direction_swap_${ref}`);
+      setIsDirectionSwapped(saved === "true");
+    }
+  }, [ref]);
+
   const filteredDrivers = drivers.filter(
     (d) =>
-      d.name.toLowerCase().includes(driverSearchTerm.toLowerCase()) ||
-      d.phone_number.includes(driverSearchTerm)
+      (d.name || "").toLowerCase().includes(driverSearchTerm.toLowerCase()) ||
+      (d.phone_number || "").includes(driverSearchTerm)
   );
 
   const filteredVehicles = vehicles.filter(
     (v) =>
-      v.registration.toLowerCase().includes(vehicleSearchTerm.toLowerCase()) ||
-      (v.brand &&
-        v.brand.toLowerCase().includes(vehicleSearchTerm.toLowerCase())) ||
-      (v.model &&
-        v.model.toLowerCase().includes(vehicleSearchTerm.toLowerCase()))
+      (v.registration || "")
+        .toLowerCase()
+        .includes(vehicleSearchTerm.toLowerCase()) ||
+      (v.brand || "").toLowerCase().includes(vehicleSearchTerm.toLowerCase()) ||
+      (v.model || "").toLowerCase().includes(vehicleSearchTerm.toLowerCase())
   );
 
   const [assignmentForm, setAssignmentForm] = useState({
@@ -46,8 +71,6 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
     notes: "",
   });
   const [assignLoading, setAssignLoading] = useState(false);
-
-  const ref = bookingRef?.ref || bookingRef;
 
   // === Assignment Functions ===
   const fetchAssignment = async () => {
@@ -102,12 +125,13 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
       return;
     }
 
-    // ตรวจสอบ booking status
+    // ตรวจสอบ booking status - อนุญาตให้ ACON และ AAMM assign job ได้
     const booking = bookingDetail?.booking;
     const bookingStatus = booking?.general?.status;
-    if (bookingStatus !== "ACON") {
+    const allowedStatuses = ["ACON", "AAMM"];
+    if (!allowedStatuses.includes(bookingStatus)) {
       alert(
-        "Cannot assign job. Only confirmed bookings (ACON) can be assigned."
+        "Cannot assign job. Only confirmed bookings (ACON) or amendment approved bookings (AAMM) can be assigned."
       );
       return;
     }
@@ -258,7 +282,7 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
   const handleCopyLink = () => {
     if (trackingLink?.tracking_url) {
       navigator.clipboard.writeText(trackingLink.tracking_url);
-      alert("Link copied to clipboard!");
+      // alert("Link copied to clipboard!");
     }
   };
 
@@ -270,18 +294,60 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
     const arrival = booking?.arrival || {};
     const departure = booking?.departure || {};
 
-    // กำหนดข้อมูลตาม booking type
-    const isArrival = general.bookingtype?.toLowerCase().includes("arrival");
-    const pickupDate = isArrival
-      ? arrival.arrivaldate
-      : departure.pickupdate || departure.departuredate;
-    const flightNo = isArrival ? arrival.flightno : departure.flightno;
-    const pickupLocation = isArrival
-      ? general.airport || "Airport"
-      : arrival.accommodationname || "Hotel";
-    const dropoffLocation = isArrival
-      ? arrival.accommodationname || "Hotel"
-      : general.airport || "Airport";
+    // กำหนดข้อมูลตาม booking type + manual swap
+    // Check if it's an Arrival transfer:
+    // - booking_type contains "arrival" or "outbound" (outbound = going to hotel)
+    // - OR has arrival data but no departure data
+    const bookingTypeLower = general.bookingtype?.toLowerCase() || "";
+    let isArrival =
+      bookingTypeLower.includes("arrival") ||
+      bookingTypeLower.includes("outbound") ||
+      (arrival.arrivaldate &&
+        !departure.departuredate &&
+        !departure.pickupdate);
+
+    // Apply manual swap
+    if (isDirectionSwapped) {
+      isArrival = !isArrival;
+    }
+
+    // Use adjusted pickup date if available, otherwise use original
+    let originalPickupDate, pickupLocation, dropoffLocation, flightNo;
+
+    // Handle Quote bookings separately
+    if (general.bookingtype === "Quote") {
+      const quote = booking?.quote || {};
+      originalPickupDate = quote.transferdate;
+
+      // Apply direction swap for Quote
+      if (isDirectionSwapped) {
+        pickupLocation = quote.dropoffaddress1 || "Dropoff Location";
+        dropoffLocation = quote.pickupaddress1 || "Pickup Location";
+      } else {
+        pickupLocation = quote.pickupaddress1 || "Pickup Location";
+        dropoffLocation = quote.dropoffaddress1 || "Dropoff Location";
+      }
+
+      flightNo = arrival.flightno || departure.flightno || null;
+    } else {
+      // Handle Arrival/Departure bookings
+      originalPickupDate = isArrival
+        ? arrival.arrivaldate
+        : departure.pickupdate || departure.departuredate;
+      flightNo = isArrival ? arrival.flightno : departure.flightno;
+      pickupLocation = isArrival
+        ? general.airport || "Airport"
+        : departure.accommodationname ||
+          arrival.accommodationname ||
+          general.resort ||
+          "Hotel";
+      dropoffLocation = isArrival
+        ? arrival.accommodationname || general.resort || "Hotel"
+        : general.airport || "Airport";
+    }
+
+    const pickupDate = booking?.pickup_date_adjusted || originalPickupDate;
+    const isTimeAdjusted = !!booking?.pickup_date_adjusted;
 
     // นับจำนวนผู้โดยสาร
     const passengers = [];
@@ -296,7 +362,9 @@ function BookingDetailPage({ bookingRef, onBack, fromPage = "dashboard" }) {
 👤 ชื่อลูกค้า: ${general.passengername || "N/A"}
 👥 จำนวน: ${passengerCount}
 
-📅 วันที่รับ: ${formatDateTime(pickupDate)}
+📅 วันที่รับ: ${formatDateTime(pickupDate)}${
+      isTimeAdjusted ? " (เวลาใหม่)" : ""
+    }
 ${flightNo ? `✈️ เที่ยวบิน: ${flightNo}` : ""}
 📍 รับที่: ${pickupLocation}
 📍 ส่งที่: ${dropoffLocation}
@@ -327,7 +395,9 @@ ${trackingLink.tracking_url}
       driver_id: driver.id,
       vehicle_id: driver.default_vehicle_id || assignmentForm.vehicle_id,
     });
-    setDriverSearchTerm(`${driver.name} (${driver.phone_number})`);
+    setDriverSearchTerm(
+      `${driver.name || "N/A"} (${driver.phone_number || "N/A"})`
+    );
     setShowDriverDropdown(false);
   };
 
@@ -338,7 +408,9 @@ ${trackingLink.tracking_url}
       vehicle_id: vehicle.id,
     });
     setVehicleSearchTerm(
-      `${vehicle.registration} - ${vehicle.brand} ${vehicle.model}`
+      `${vehicle.registration || "N/A"} - ${vehicle.brand || "N/A"} ${
+        vehicle.model || ""
+      }`
     );
     setShowVehicleDropdown(false);
   };
@@ -373,20 +445,104 @@ ${trackingLink.tracking_url}
     setShowAssignModal(true);
   };
 
+  const handleProvinceSaved = () => {
+    fetchBookingDetail(); // Refresh booking detail
+    setShowEditProvinceModal(false);
+  };
+
+  // Fetch provinces list
+  useEffect(() => {
+    const fetchProvinces = async () => {
+      try {
+        const response = await fetch(
+          `${
+            import.meta.env.VITE_API_BASE_URL ||
+            "https://www.tptraveltransfer.com/api"
+          }/bookings/provinces.php`
+        );
+        const data = await response.json();
+        if (data.success) {
+          setProvinces(data.data);
+        }
+      } catch (error) {
+        console.error("Error fetching provinces:", error);
+      }
+    };
+
+    fetchProvinces();
+  }, []);
+
   useEffect(() => {
     if (ref) {
-      fetchBookingDetail();
+      fetchBookingDetail(true); // Auto-sync from Holiday Taxis API every time
       fetchAssignment();
       fetchDriversAndVehicles();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref]);
 
-  const fetchBookingDetail = async () => {
+  // Handle click outside to close dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        driverDropdownRef.current &&
+        !driverDropdownRef.current.contains(event.target)
+      ) {
+        setShowDriverDropdown(false);
+      }
+      if (
+        vehicleDropdownRef.current &&
+        !vehicleDropdownRef.current.contains(event.target)
+      ) {
+        setShowVehicleDropdown(false);
+      }
+    };
+
+    if (showDriverDropdown || showVehicleDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+      };
+    }
+  }, [showDriverDropdown, showVehicleDropdown]);
+
+  const syncBookingFromAPI = async () => {
+    try {
+      const apiUrl = `${
+        import.meta.env.VITE_API_BASE_URL ||
+        "https://www.tptraveltransfer.com/api"
+      }/sync/get-booking.php?booking_ref=${ref}`;
+
+      const response = await fetch(apiUrl);
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to sync booking from API");
+      }
+
+      return data;
+    } catch (err) {
+      console.error("Error syncing booking from API:", err);
+      throw err;
+    }
+  };
+
+  const fetchBookingDetail = async (shouldSync = false) => {
     try {
       setLoading(true);
       setError(null);
 
+      // Step 1: Sync from API if requested
+      if (shouldSync) {
+        try {
+          await syncBookingFromAPI();
+        } catch (syncErr) {
+          console.error("Sync error:", syncErr);
+          // Continue to fetch from DB even if sync fails
+        }
+      }
+
+      // Step 2: Fetch from Database
       const response = await backendApi.getBookingDetailFromDB(ref);
 
       if (response.success) {
@@ -439,12 +595,17 @@ ${trackingLink.tracking_url}
 
   const formatDate = (dateString) => {
     if (!dateString) return "-";
-    return new Date(dateString).toLocaleDateString("en-GB");
+    const date = new Date(dateString);
+    // Check if date is invalid
+    if (isNaN(date.getTime())) return "-";
+    return date.toLocaleDateString("en-GB");
   };
 
   const formatDateTime = (dateString) => {
     if (!dateString) return "-";
     const date = new Date(dateString);
+    // Check if date is invalid
+    if (isNaN(date.getTime())) return "-";
     return `${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString(
       "en-GB",
       {
@@ -574,6 +735,17 @@ ${trackingLink.tracking_url}
   const arrival = booking?.arrival || {};
   const departure = booking?.departure || {};
 
+  // Debug: ดูโครงสร้างข้อมูล
+  console.log("=== Booking Detail Debug ===");
+  console.log("bookingDetail:", bookingDetail);
+  console.log("booking:", booking);
+  console.log("general:", general);
+  console.log("arrival:", arrival);
+  console.log("departure:", departure);
+  console.log("booking.arrival_date:", booking?.arrival_date);
+  console.log("booking.departure_date:", booking?.departure_date);
+  console.log("booking.pickup_date:", booking?.pickup_date);
+
   const statusColor =
     general.status === "PCON"
       ? "bg-blue-100 text-blue-800"
@@ -644,17 +816,23 @@ ${trackingLink.tracking_url}
           {/* Assignment Button */}
           <button
             onClick={openAssignModal}
-            disabled={!assignment && general.status !== "ACON"}
-            className={`px-4 py-2 text-sm font-medium rounded-lg text-white ${
+            disabled={
+              !assignment &&
+              general.status !== "ACON" &&
+              general.status !== "AAMM"
+            }
+            className={`group px-4 py-2 text-sm font-medium rounded-lg text-white ${
               assignment
                 ? "bg-green-600 hover:bg-green-700"
-                : general.status === "ACON"
+                : general.status === "ACON" || general.status === "AAMM"
                 ? "bg-yellow-600 hover:bg-yellow-700"
                 : "bg-gray-400 cursor-not-allowed"
             } disabled:opacity-50`}
             title={
-              !assignment && general.status !== "ACON"
-                ? "Only confirmed bookings (ACON) can be assigned"
+              !assignment &&
+              general.status !== "ACON" &&
+              general.status !== "AAMM"
+                ? "Only confirmed bookings (ACON) or amendment approved bookings (AAMM) can be assigned"
                 : ""
             }
           >
@@ -663,7 +841,14 @@ ${trackingLink.tracking_url}
                 assignment ? "fa-user-check" : "fa-user-plus"
               } mr-2`}
             ></i>
-            {assignment ? "Assigned" : "Assign Job"}
+            {assignment ? (
+              <>
+                <span className="group-hover:hidden">Assigned</span>
+                <span className="hidden group-hover:inline">Reassign Job</span>
+              </>
+            ) : (
+              <span>Assign Job</span>
+            )}
           </button>
 
           {/* Generate Tracking Link Button */}
@@ -688,120 +873,614 @@ ${trackingLink.tracking_url}
           )}
 
           <button
-            onClick={fetchBookingDetail}
+            onClick={() => fetchBookingDetail(true)}
+            disabled={loading}
             className={`px-4 py-2 text-sm font-medium rounded-lg ${getCompanyClass(
               "primary"
-            )} ${getCompanyClass("primaryHover")} text-white`}
+            )} ${getCompanyClass(
+              "primaryHover"
+            )} text-white disabled:opacity-50`}
+            title="Sync from Holiday Taxis API and refresh"
           >
-            <i className="fas fa-sync-alt mr-2"></i>
-            Refresh
+            <i
+              className={`fas fa-sync-alt mr-2 ${
+                loading ? "animate-spin" : ""
+              }`}
+            ></i>
+            Refresh from API
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* General Information */}
-        <Section
-          title="General Information"
-          right={
-            general.bookingtype ? (
-              <span className="text-sm text-gray-500">
-                {formatDate(general?.bookingdate)}
-              </span>
-            ) : null
-          }
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Row label="Booking Type" value={general.bookingtype || "-"} />
-            <Row label="Vehicle" value={general.vehicle || "-"} />
+      {/* Transfer Summary Card */}
+      <div className="bg-gradient-to-br from-blue-50 to-blue-50 rounded-xl shadow-sm border border-blue-100 p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <i className="fas fa-route text-blue-600 text-lg"></i>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Transfer Summary
+            </h3>
+          </div>
+          {/* Swap Button */}
+          <button
+            onClick={() => {
+              const newValue = !isDirectionSwapped;
+              setIsDirectionSwapped(newValue);
+              localStorage.setItem(
+                `direction_swap_${ref}`,
+                newValue.toString()
+              );
+            }}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+              isDirectionSwapped
+                ? "bg-orange-600 text-white hover:bg-orange-700"
+                : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
+            }`}
+            title="สลับสถานที่ From ↔ To"
+          >
+            <i className="fas fa-exchange-alt mr-2"></i>
+            {isDirectionSwapped ? "สถานที่ถูกสลับแล้ว" : "สลับสถานที่"}
+          </button>
+        </div>
 
-            <div className="md:col-span-2">
-              <SimpleList
-                items={[
-                  { label: "Adults", value: general.adults || 0 },
-                  { label: "Children", value: general.children || 0 },
-                  { label: "Infants", value: general.infants || 0 },
-                  { label: "Airport", value: general.airport || "-" },
-                  { label: "Resort", value: general.resort || "-" },
-                ]}
-              />
+        {/* Route Display */}
+        <div className="bg-white rounded-lg p-5">
+          <div className="flex items-center gap-4">
+            {/* From Location */}
+            <div className="flex-1 text-center">
+              <div className="inline-flex items-center gap-2 mb-2">
+                <div className="w-2.5 h-2.5 bg-green-500 rounded-full"></div>
+                <span className="text-xs font-medium text-gray-500">From</span>
+              </div>
+              <p className="font-semibold text-gray-900 text-sm sm:text-base">
+                {(() => {
+                  // Quote bookings - Point-to-Point
+                  if (general.bookingtype === "Quote") {
+                    const quote = bookingDetail?.booking?.quote;
+                    return isDirectionSwapped
+                      ? quote?.dropoffaddress1 || "Dropoff Location"
+                      : quote?.pickupaddress1 || "Pickup Location";
+                  }
+
+                  // Airport bookings
+                  const bookingTypeLower =
+                    general.bookingtype?.toLowerCase() || "";
+                  let isArrival =
+                    bookingTypeLower.includes("arrival") ||
+                    bookingTypeLower.includes("outbound") ||
+                    (arrival.arrivaldate &&
+                      !departure.departuredate &&
+                      !departure.pickupdate);
+                  if (isDirectionSwapped) isArrival = !isArrival;
+
+                  return isArrival
+                    ? general.airport || arrival.fromairport || "Airport"
+                    : departure.accommodationname ||
+                        arrival.accommodationname ||
+                        general.resort ||
+                        "Accommodation";
+                })()}
+              </p>
+              {/* Show city/province for Quote bookings */}
+              {general.bookingtype === "Quote" &&
+                (() => {
+                  const quote = bookingDetail?.booking?.quote;
+                  const city = isDirectionSwapped
+                    ? quote?.dropoffaddress3 || quote?.dropoffaddress2
+                    : quote?.pickupaddress3 || quote?.pickupaddress2;
+                  return city ? (
+                    <p className="text-xs text-gray-500 mt-1">{city}</p>
+                  ) : null;
+                })()}
+            </div>
+
+            {/* Arrow - Centered */}
+            <div className="flex items-center justify-center px-2">
+              <i className="fas fa-arrow-right text-blue-500 text-2xl"></i>
+            </div>
+
+            {/* To Location */}
+            <div className="flex-1 text-center">
+              <div className="inline-flex items-center gap-2 mb-2">
+                <div className="w-2.5 h-2.5 bg-red-500 rounded-full"></div>
+                <span className="text-xs font-medium text-gray-500">To</span>
+              </div>
+              <p className="font-semibold text-gray-900 text-sm sm:text-base">
+                {(() => {
+                  // Quote bookings - Point-to-Point
+                  if (general.bookingtype === "Quote") {
+                    const quote = bookingDetail?.booking?.quote;
+                    return isDirectionSwapped
+                      ? quote?.pickupaddress1 || "Pickup Location"
+                      : quote?.dropoffaddress1 || "Dropoff Location";
+                  }
+
+                  // Airport bookings
+                  const bookingTypeLower =
+                    general.bookingtype?.toLowerCase() || "";
+                  let isArrival =
+                    bookingTypeLower.includes("arrival") ||
+                    bookingTypeLower.includes("outbound") ||
+                    (arrival.arrivaldate &&
+                      !departure.departuredate &&
+                      !departure.pickupdate);
+                  if (isDirectionSwapped) isArrival = !isArrival;
+
+                  return isArrival
+                    ? arrival.accommodationname ||
+                        general.resort ||
+                        "Accommodation"
+                    : general.airport || departure.toairport || "Airport";
+                })()}
+              </p>
+              {/* Show city/province for Quote bookings */}
+              {general.bookingtype === "Quote" &&
+                (() => {
+                  const quote = bookingDetail?.booking?.quote;
+                  const city = isDirectionSwapped
+                    ? quote?.pickupaddress3 || quote?.pickupaddress2
+                    : quote?.dropoffaddress3 || quote?.dropoffaddress2;
+                  return city ? (
+                    <p className="text-xs text-gray-500 mt-1">{city}</p>
+                  ) : null;
+                })()}
             </div>
           </div>
-        </Section>
+        </div>
 
-        {/* Passenger Information */}
-        <Section title="Passenger Information">
-          <SimpleList
-            items={[
-              { label: "Name", value: general.passengername || "-" },
-              { label: "Phone", value: general.passengertelno || "-" },
-              { label: "Email", value: general.passengeremail || "-" },
-            ]}
-          />
-        </Section>
-
-        {/* Arrival Information */}
-        {arrival && Object.keys(arrival).length > 0 && (
-          <Section title="Arrival Information">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <Row
-                label="Arrival Date"
-                value={formatDateTime(arrival.arrivaldate)}
-              />
-              <Row label="Flight Number" value={arrival.flightno || "-"} />
+        {/* Date, Time & Details */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+          {/* Date & Time */}
+          <div className="bg-white rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <i className="fas fa-calendar-alt text-blue-600"></i>
+              <p className="text-xs text-gray-500 font-medium">Date & Time</p>
             </div>
-            <SimpleList
-              items={[
-                {
-                  label: "Accommodation",
-                  value: arrival.accommodationname || "-",
-                },
-                {
-                  label: "Address",
-                  value:
-                    [
-                      arrival.accommodationaddress1,
-                      arrival.accommodationaddress2,
-                    ]
-                      .filter(Boolean)
-                      .join(", ") || "-",
-                },
-                { label: "Contact", value: arrival.accommodationtel || "-" },
-              ]}
-            />
-          </Section>
-        )}
+            {(() => {
+              const originalPickupDate = general.bookingtype
+                ?.toLowerCase()
+                .includes("arrival")
+                ? arrival.arrivaldate
+                : departure.pickupdate || departure.departuredate;
+              const adjustedPickupDate = booking?.pickup_date_adjusted;
 
-        {/* Departure Information */}
-        {departure && Object.keys(departure).length > 0 && (
-          <Section title="Departure Information">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <Row
-                label="Departure Date"
-                value={formatDateTime(departure.departuredate)}
-              />
-              <Row
-                label="Pickup Date"
-                value={formatDateTime(departure.pickupdate)}
-              />
+              return adjustedPickupDate ? (
+                // Show adjusted time with indicator
+                <div>
+                  <div className="flex items-center gap-2">
+                    <i className="fas fa-clock text-orange-600 text-sm"></i>
+                    <p className="font-semibold text-orange-600">
+                      {formatDateTime(adjustedPickupDate)}
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-400 line-through mt-1">
+                    {formatDateTime(originalPickupDate)}
+                  </p>
+                  <p className="text-xs text-orange-600 mt-0.5">
+                    (เวลาปรับแล้ว)
+                  </p>
+                </div>
+              ) : (
+                // Show original time
+                <p className="font-semibold text-gray-900">
+                  {formatDateTime(originalPickupDate)}
+                </p>
+              );
+            })()}
+          </div>
+
+          {/* Flight Number */}
+          {(arrival.flightno || departure.flightno) && (
+            <div className="bg-white rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <i className="fas fa-plane text-blue-600"></i>
+                <p className="text-xs text-gray-500 font-medium">
+                  Flight Number
+                </p>
+              </div>
+              <p className="font-semibold text-gray-900">
+                {arrival.flightno || departure.flightno || "-"}
+              </p>
             </div>
-            <SimpleList
-              items={[
-                { label: "Flight Number", value: departure.flightno || "-" },
-                {
-                  label: "Accommodation",
-                  value: departure.accommodationname || "-",
-                },
-              ]}
-            />
-          </Section>
-        )}
+          )}
+
+          {/* Passengers */}
+          <div className="bg-white rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <i className="fas fa-users text-blue-600"></i>
+              <p className="text-xs text-gray-500 font-medium">Passengers</p>
+            </div>
+            <p className="font-semibold text-gray-900">
+              {general.pax ||
+                general.adults + general.children + general.infants ||
+                0}{" "}
+              pax
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              {general.adults || 0} Adults, {general.children || 0} Children,{" "}
+              {general.infants || 0} Infants
+            </p>
+          </div>
+
+          {/* Vehicle */}
+          <div className="bg-white rounded-lg p-4 ">
+            <div className="flex items-center gap-2 mb-2">
+              <i className="fas fa-car text-blue-600"></i>
+              <p className="text-xs text-gray-500 font-medium">Vehicle</p>
+            </div>
+            <p className="font-semibold text-gray-900">
+              {general.vehicle || "-"}
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* Booking Details - Simple List */}
+      <Section title="Booking Details">
+        <div className="space-y-3 text-sm">
+          <div className="flex">
+            <span className="text-gray-600 w-40">Leadname:</span>
+            <span className="font-medium text-gray-900">
+              {general.passengername || "-"}
+            </span>
+          </div>
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">Mobile no:</span>
+            <span className="text-gray-900">
+              {general.passengertelno || "-"}
+            </span>
+          </div>
+
+          {general.passengeremail && (
+            <div className="flex">
+              <span className="text-gray-600 w-40">Email:</span>
+              <span className="text-gray-900">{general.passengeremail}</span>
+            </div>
+          )}
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">Airport:</span>
+            <span className="text-gray-900">{general.airport || "-"}</span>
+          </div>
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">Resort:</span>
+            <span className="text-gray-900">
+              {general.resort || booking?.accommodation_name || "-"}
+            </span>
+          </div>
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">Province:</span>
+            <span className="text-gray-900">
+              {bookingDetail?.booking?.province || "Unknown"}
+              <button
+                onClick={() => setShowEditProvinceModal(true)}
+                className="ml-2 text-blue-600 hover:text-blue-800 text-xs"
+                title="Edit Province"
+              >
+                <i className="fas fa-edit"></i>
+              </button>
+            </span>
+          </div>
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">Vehicle details:</span>
+            <span className="text-gray-900">{general.vehicle || "-"}</span>
+          </div>
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">No of pax travelling:</span>
+            <span className="text-gray-900">
+              {general.pax ||
+                general.adults + general.children + general.infants ||
+                0}
+            </span>
+          </div>
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">No of adults:</span>
+            <span className="text-gray-900">{general.adults || 0}</span>
+          </div>
+
+          {(general.children > 0 || general.infants > 0) && (
+            <>
+              <div className="flex">
+                <span className="text-gray-600 w-40">Children:</span>
+                <span className="text-gray-900">{general.children || 0}</span>
+              </div>
+              <div className="flex">
+                <span className="text-gray-600 w-40">Infants:</span>
+                <span className="text-gray-900">{general.infants || 0}</span>
+              </div>
+            </>
+          )}
+
+          <div className="flex">
+            <span className="text-gray-600 w-40">Date booked:</span>
+            <span className="text-gray-900">
+              {formatDate(general?.bookingdate) || "-"}
+            </span>
+          </div>
+        </div>
+      </Section>
+
+      {/* Transfer Details - Based on Type */}
+      {(() => {
+        const isQuote = general.bookingtype === "Quote";
+        const isArrival = general.bookingtype === "Single outbound only";
+        const isDeparture = general.bookingtype === "Single return only";
+
+        if (isQuote && bookingDetail?.booking?.quote) {
+          const quote = bookingDetail.booking.quote;
+          return (
+            <Section title="Transfer Details (Point-to-Point)">
+              <div className="space-y-3 text-sm">
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Transfer date:</span>
+                  <span className="text-gray-900">
+                    {formatDateTime(quote.transferdate)}
+                  </span>
+                </div>
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Pickup location:</span>
+                  <span className="text-gray-900">
+                    {quote.pickupaddress1 || "-"}
+                  </span>
+                </div>
+                {quote.pickupaddress2 && (
+                  <div className="flex">
+                    <span className="text-gray-600 w-40">Address:</span>
+                    <span className="text-gray-900">
+                      {[
+                        quote.pickupaddress2,
+                        quote.pickupaddress3,
+                        quote.pickupaddress4,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                  </div>
+                )}
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Dropoff location:</span>
+                  <span className="text-gray-900">
+                    {quote.dropoffaddress1 || "-"}
+                  </span>
+                </div>
+                {quote.dropoffaddress2 && (
+                  <div className="flex">
+                    <span className="text-gray-600 w-40">Address:</span>
+                    <span className="text-gray-900">
+                      {[
+                        quote.dropoffaddress2,
+                        quote.dropoffaddress3,
+                        quote.dropoffaddress4,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </Section>
+          );
+        }
+
+        if (isArrival) {
+          const adjustedTime = booking?.pickup_date_adjusted;
+          const arrivalDate = arrival?.arrivaldate;
+          return (
+            <Section title="Arrival Details">
+              <div className="space-y-3 text-sm">
+                {arrival?.fromairport && (
+                  <div className="flex">
+                    <span className="text-gray-600 w-40">From airport:</span>
+                    <span className="text-gray-900">{arrival.fromairport}</span>
+                  </div>
+                )}
+                {arrival?.flightno && (
+                  <div className="flex">
+                    <span className="text-gray-600 w-40">Flight no:</span>
+                    <span className="text-gray-900">{arrival.flightno}</span>
+                  </div>
+                )}
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Arrival date:</span>
+                  <span className="text-gray-900">
+                    {formatDate(arrivalDate)}
+                  </span>
+                </div>
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Arrival time:</span>
+                  <span className="text-gray-900">
+                    {arrivalDate
+                      ? new Date(arrivalDate).toLocaleTimeString("en-GB", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "-"}
+                    {adjustedTime && (
+                      <span className="ml-2 text-orange-600 text-xs">
+                        (Adjusted)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {arrival?.accommodationname && (
+                  <>
+                    <div className="flex">
+                      <span className="text-gray-600 w-40">Accommodation:</span>
+                      <span className="text-gray-900">
+                        {arrival.accommodationname}
+                      </span>
+                    </div>
+                    {arrival?.accommodationaddress1 && (
+                      <div className="flex">
+                        <span className="text-gray-600 w-40">Address:</span>
+                        <span className="text-gray-900">
+                          {[
+                            arrival.accommodationaddress1,
+                            arrival.accommodationaddress2,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </Section>
+          );
+        }
+
+        if (isDeparture) {
+          const adjustedTime = booking?.pickup_date_adjusted;
+          const departureDate = departure?.departuredate;
+          const pickupDate = departure?.pickupdate;
+          return (
+            <Section title="Departure Details">
+              <div className="space-y-3 text-sm">
+                {departure?.toairport && (
+                  <div className="flex">
+                    <span className="text-gray-600 w-40">To airport:</span>
+                    <span className="text-gray-900">{departure.toairport}</span>
+                  </div>
+                )}
+                {departure?.flightno && (
+                  <div className="flex">
+                    <span className="text-gray-600 w-40">Flight no:</span>
+                    <span className="text-gray-900">{departure.flightno}</span>
+                  </div>
+                )}
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Departure date:</span>
+                  <span className="text-gray-900">
+                    {formatDate(departureDate)}
+                  </span>
+                </div>
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Departure time:</span>
+                  <span className="text-gray-900">
+                    {departureDate
+                      ? new Date(departureDate).toLocaleTimeString("en-GB", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "-"}
+                  </span>
+                </div>
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Pick up date:</span>
+                  <span className="text-gray-900">
+                    {formatDate(pickupDate)}
+                  </span>
+                </div>
+                <div className="flex">
+                  <span className="text-gray-600 w-40">Pick up time:</span>
+                  <span className="text-gray-900">
+                    {pickupDate
+                      ? new Date(pickupDate).toLocaleTimeString("en-GB", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "-"}
+                    {adjustedTime && (
+                      <span className="ml-2 text-orange-600 text-xs">
+                        (Adjusted)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {departure?.accommodationname && (
+                  <>
+                    <div className="flex">
+                      <span className="text-gray-600 w-40">Accommodation:</span>
+                      <span className="text-gray-900">
+                        {departure.accommodationname}
+                      </span>
+                    </div>
+                    {departure?.accommodationaddress1 && (
+                      <div className="flex">
+                        <span className="text-gray-600 w-40">Address:</span>
+                        <span className="text-gray-900">
+                          {[
+                            departure.accommodationaddress1,
+                            departure.accommodationaddress2,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </Section>
+          );
+        }
+      })()}
+
+      {/* Assignment */}
+      {assignment && (
+        <Section title="Assignment">
+          <div className="space-y-3 text-sm bg-green-50 rounded-lg p-4 border border-green-200">
+            <div className="flex">
+              <span className="text-gray-600 w-40">Driver:</span>
+              <span className="font-medium text-gray-900">
+                {assignment.driver_name || "-"}
+              </span>
+            </div>
+            <div className="flex">
+              <span className="text-gray-600 w-40">Driver phone:</span>
+              <span className="text-gray-900">
+                {assignment.driver_phone || "-"}
+              </span>
+            </div>
+            <div className="flex">
+              <span className="text-gray-600 w-40">Vehicle:</span>
+              <span className="text-gray-900">
+                {assignment.registration || "-"} ({assignment.brand}{" "}
+                {assignment.model})
+              </span>
+            </div>
+            <div className="flex">
+              <span className="text-gray-600 w-40">Status:</span>
+              <span className={`font-medium ${assignment.completion_type === "NO_SHOW" ? "text-red-600" : "text-gray-900"}`}>
+                {assignment.completion_type === "NO_SHOW"
+                  ? "No Show"
+                  : assignment.status === "assigned"
+                  ? "Assigned"
+                  : assignment.status === "in_progress"
+                  ? "In Progress"
+                  : assignment.status === "completed"
+                  ? "Completed"
+                  : assignment.status}
+              </span>
+            </div>
+            <div className="flex">
+              <span className="text-gray-600 w-40">Assigned at:</span>
+              <span className="text-gray-900">
+                {formatDateTime(assignment.created_at)}
+              </span>
+            </div>
+            {assignment.assignment_notes && (
+              <div className="flex">
+                <span className="text-gray-600 w-40">Notes:</span>
+                <span className="text-gray-900">
+                  {assignment.assignment_notes}
+                </span>
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
 
       {/* Notes */}
       {(apiNotes || notesLoading) && (
-        <Section title="Booking Notes (from API)">
+        <Section title="Booking Notes">
           {notesLoading ? (
             <div className="bg-gray-50 rounded-lg p-4 text-center">
               <i className="fas fa-spinner animate-spin mr-2"></i>
@@ -843,24 +1522,46 @@ ${trackingLink.tracking_url}
             <div className="p-6 space-y-4">
               {/* Show current assignment if exists */}
               {assignment && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-blue-900 font-medium mb-2">
-                    Current Assignment:
-                  </p>
-                  <p className="text-sm text-blue-800">
-                    <i className="fas fa-user mr-2"></i>
-                    {assignment.driver_name}
-                  </p>
-                  <p className="text-sm text-blue-800">
-                    <i className="fas fa-car mr-2"></i>
-                    {assignment.registration} - {assignment.brand}{" "}
-                    {assignment.model}
-                  </p>
-                </div>
+                <>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <p className="text-sm text-blue-900 font-medium mb-2">
+                      Current Assignment:
+                    </p>
+                    <p className="text-sm text-blue-800">
+                      <i className="fas fa-user mr-2"></i>
+                      {assignment.driver_name}
+                    </p>
+                    <p className="text-sm text-blue-800">
+                      <i className="fas fa-car mr-2"></i>
+                      {assignment.registration} - {assignment.brand}{" "}
+                      {assignment.model}
+                    </p>
+                  </div>
+
+                  {/* Warning if driver has already started */}
+                  {assignment.status === 'in_progress' && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-4">
+                      <div className="flex items-start gap-3">
+                        <i className="fas fa-exclamation-triangle text-orange-600 text-lg mt-0.5"></i>
+                        <div>
+                          <p className="text-sm text-orange-900 font-medium">
+                            คำเตือน: คนขับเริ่มงานแล้ว
+                          </p>
+                          <p className="text-xs text-orange-700 mt-1">
+                            เมื่อเปลี่ยนคนขับหรือรถ ระบบจะแจ้ง Holiday Taxis ให้ยกเลิกข้อมูลคนขับเดิมอัตโนมัติ
+                          </p>
+                          <p className="text-xs text-orange-700 mt-1 font-medium">
+                            กรุณาแจ้งคนขับเดิมทันที เพื่อไม่ให้เกิดความสับสน
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Driver Autocomplete */}
-              <div className="relative">
+              <div className="relative" ref={driverDropdownRef}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Select Driver *
                 </label>
@@ -887,10 +1588,10 @@ ${trackingLink.tracking_url}
                         className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
                       >
                         <div className="font-medium text-gray-900">
-                          {driver.name}
+                          {driver.name || "N/A"}
                         </div>
                         <div className="text-sm text-gray-600">
-                          {driver.phone_number}
+                          {driver.phone_number || "N/A"}
                         </div>
                       </div>
                     ))}
@@ -899,7 +1600,7 @@ ${trackingLink.tracking_url}
               </div>
 
               {/* Vehicle Autocomplete */}
-              <div className="relative">
+              <div className="relative" ref={vehicleDropdownRef}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Select Vehicle *
                 </label>
@@ -926,10 +1627,10 @@ ${trackingLink.tracking_url}
                         className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
                       >
                         <div className="font-medium text-gray-900">
-                          {vehicle.registration}
+                          {vehicle.registration || "N/A"}
                         </div>
                         <div className="text-sm text-gray-600">
-                          {vehicle.brand} {vehicle.model}
+                          {vehicle.brand || "N/A"} {vehicle.model || ""}
                         </div>
                       </div>
                     ))}
@@ -1090,7 +1791,7 @@ ${trackingLink.tracking_url}
                   </button>
                 </div>
 
-                <div className="bg-white rounded-lg p-4 text-sm text-gray-800 whitespace-pre-line border border-blue-200 font-mono">
+                <div className="bg-white rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap break-words border border-blue-200">
                   {generateDriverMessage()}
                 </div>
 
@@ -1122,6 +1823,20 @@ ${trackingLink.tracking_url}
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Province Modal */}
+      {showEditProvinceModal && bookingDetail && (
+        <EditProvinceModal
+          booking={{
+            ref: ref,
+            province: bookingDetail.booking.province,
+            province_source: bookingDetail.booking.province_source,
+          }}
+          provinces={provinces}
+          onClose={() => setShowEditProvinceModal(false)}
+          onSave={handleProvinceSaved}
+        />
       )}
     </div>
   );

@@ -51,22 +51,22 @@ try {
         exit;
     }
 
-    // Validate date range: Can only start from pickup_date to +24 hours
+    // Validate date range: Can start from 5 hours before pickup to +24 hours after
     $pickupDate = $tokenData['pickup_date'] ?? $tokenData['arrival_date'] ?? $tokenData['departure_date'];
 
     if ($pickupDate) {
         $pickupTimestamp = strtotime($pickupDate);
         $now = time();
 
-        // Calculate allowed range: from pickup time to +24 hours
-        $startAllowed = $pickupTimestamp;
+        // Calculate allowed range: 5 hours before pickup to +24 hours after pickup
+        $startAllowed = $pickupTimestamp - (5 * 60 * 60); // 5 hours before pickup
         $endAllowed = $pickupTimestamp + (24 * 60 * 60); // +24 hours from pickup time
 
         if ($now < $startAllowed) {
             http_response_code(403);
             echo json_encode([
                 'success' => false,
-                'error' => 'Cannot start job yet. You can start from the pickup time.',
+                'error' => 'Cannot start job yet. You can start from 5 hours before the pickup time.',
                 'can_start_at' => date('Y-m-d H:i:s', $startAllowed),
                 'pickup_time' => date('Y-m-d H:i:s', $pickupTimestamp)
             ]);
@@ -98,6 +98,18 @@ try {
         }
     }
 
+    // Check if already completed
+    if ($tokenData['status'] === 'completed') {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'This job has already been completed',
+            'completed_at' => $tokenData['completed_at'],
+            'status' => 'completed'
+        ]);
+        exit;
+    }
+
     // Check if already started
     if ($tokenData['status'] === 'active') {
         echo json_encode([
@@ -119,6 +131,20 @@ try {
     $updateStmt = $pdo->prepare($updateSql);
     $updateStmt->execute([':token' => $token]);
 
+    // Update assignment status to in_progress
+    $updateAssignmentSql = "UPDATE driver_vehicle_assignments
+                           SET status = 'in_progress'
+                           WHERE id = :assignment_id";
+    $updateAssignmentStmt = $pdo->prepare($updateAssignmentSql);
+    $updateAssignmentStmt->execute([':assignment_id' => $tokenData['assignment_id']]);
+
+    // Update booking internal_status
+    $updateBookingSql = "UPDATE bookings
+                        SET internal_status = 'in_progress'
+                        WHERE booking_ref = :booking_ref";
+    $updateBookingStmt = $pdo->prepare($updateBookingSql);
+    $updateBookingStmt->execute([':booking_ref' => $tokenData['booking_ref']]);
+
     // Send driver and vehicle info to Holiday Taxis API
     $vehicleSyncSuccess = false;
     $vehicleSyncError = null;
@@ -126,6 +152,12 @@ try {
 
     try {
         require_once '../config/holiday-taxis.php';
+
+        // Build vehicle description with office contact
+        $vehicleDescription = 'Office Contact: +66937376128';
+
+        // Add existing description if available (though currently not stored in DB)
+        // If you want to add more info, you can append here
 
         $driverData = [
             'driver' => [
@@ -138,7 +170,8 @@ try {
                 'brand' => $tokenData['brand'],
                 'model' => $tokenData['model'],
                 'color' => $tokenData['color'] ?? 'Unknown',
-                'registration' => $tokenData['registration']
+                'registration' => $tokenData['registration'],
+                'description' => $vehicleDescription
             ]
         ];
 

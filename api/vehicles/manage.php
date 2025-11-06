@@ -98,9 +98,9 @@ function handleCreateVehicle($pdo, $data)
         sendResponse(false, null, 'Registration number is required', 400);
     }
 
-    // Validate registration format (Thai format)
-    if (!preg_match('/^[ก-ฮ]{1,2}[ก-ฮ]?\s?-?\s?[0-9]{1,4}$|^[A-Z]{1,3}\s?-?\s?[0-9]{1,4}$/', $registration)) {
-        sendResponse(false, null, 'Invalid registration format', 400);
+    // Basic validation - just ensure it's not too long
+    if (strlen($registration) > 20) {
+        sendResponse(false, null, 'Registration number is too long (max 20 characters)', 400);
     }
 
     // Check if registration exists
@@ -162,9 +162,9 @@ function handleUpdateVehicle($pdo, $vehicleId, $data)
         sendResponse(false, null, 'Registration number is required', 400);
     }
 
-    // Validate registration format
-    if (!preg_match('/^[ก-ฮ]{1,2}[ก-ฮ]?\s?-?\s?[0-9]{1,4}$|^[A-Z]{1,3}\s?-?\s?[0-9]{1,4}$/', $registration)) {
-        sendResponse(false, null, 'Invalid registration format', 400);
+    // Basic validation - just ensure it's not too long
+    if (strlen($registration) > 20) {
+        sendResponse(false, null, 'Registration number is too long (max 20 characters)', 400);
     }
 
     // Check if registration exists for other vehicles

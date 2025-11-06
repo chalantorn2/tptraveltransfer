@@ -7,7 +7,7 @@ const API_BASE_URL =
  */
 export const backendApi = {
   // Enhanced Dashboard with Auto Sync & Complete Data
-  async getEnhancedDashboardData() {
+  async getEnhancedDashboardData(forceSync = false) {
     try {
       const response = await fetch(
         `${API_BASE_URL}/dashboard/enhanced-sync.php`,
@@ -16,6 +16,9 @@ export const backendApi = {
           headers: {
             "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            force_sync: forceSync,
+          }),
         }
       );
 
@@ -33,6 +36,56 @@ export const backendApi = {
       };
     } catch (error) {
       console.error("Enhanced Dashboard API Error:", error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
+
+  // Practical Dashboard Data (New)
+  async getPracticalDashboardData() {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/dashboard/practical-data.php`
+      );
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to fetch practical dashboard data");
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error) {
+      console.error("Practical Dashboard API Error:", error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
+
+  // Booking Overview Data
+  async getBookingOverview(period = "week") {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/dashboard/booking-overview.php?period=${period}`
+      );
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to fetch booking overview data");
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error) {
+      console.error("Booking Overview API Error:", error);
       return {
         success: false,
         error: error.message,
@@ -83,7 +136,103 @@ export const backendApi = {
     }
   },
 
-  // Enhanced Sync with Detailed Data
+  // Auto-sync with Dual Query Strategy (Hourly)
+  async autoSync() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/sync/auto-sync.php`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to auto-sync with Holiday Taxis");
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error) {
+      console.error("Backend API Error (auto-sync):", error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
+
+  // Manual Sync with Extended Pickup Date Range (14 months)
+  async manualSync(months = 14, customDateFrom = null, customDateTo = null) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/sync/manual-sync.php`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          months,
+          dateFrom: customDateFrom,
+          dateTo: customDateTo,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to manual sync with Holiday Taxis");
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error) {
+      console.error("Backend API Error (manual-sync):", error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
+
+  // Manual Sync Arrivals with Custom Date Range
+  async manualSyncArrivals(dateFrom, dateTo) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/sync/manual-sync-arrivals.php`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date_from: dateFrom,
+          date_to: dateTo,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to manual sync arrivals");
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error) {
+      console.error("Backend API Error (manual-sync-arrivals):", error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
+
+  // Legacy Sync (keep for backward compatibility)
   async syncHolidayTaxis(days = 7, detailSync = true) {
     try {
       const formData = new FormData();
@@ -169,6 +318,35 @@ export const backendApi = {
     }
   },
 
+  // Export Full Booking Data
+  async exportBookingData(filters = {}) {
+    try {
+      const params = new URLSearchParams({
+        status: filters.status || "all",
+        assignment_status: filters.assignmentStatus || "",
+        date_from: filters.dateFrom || "",
+        date_to: filters.dateTo || "",
+        search: filters.search || "",
+        province: filters.province || "",
+        format: filters.format || "json",
+      });
+
+      const response = await fetch(
+        `${API_BASE_URL}/bookings/export-data.php?${params}`
+      );
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Failed to export booking data");
+      }
+
+      return { success: true, data: data.data };
+    } catch (error) {
+      console.error("Export Booking Data API Error:", error);
+      return { success: false, error: error.message };
+    }
+  },
+
   // Holiday Taxis Direct API Integration
   holidayTaxis: {
     // Search bookings from Holiday Taxis
@@ -219,6 +397,25 @@ export const backendApi = {
         return { success: true, data: data.data };
       } catch (error) {
         console.error("Holiday Taxis Booking Detail API Error:", error);
+        return { success: false, error: error.message };
+      }
+    },
+
+    // Get booking by reference (Production API - GET /bookings/{bookingRef})
+    async getBookingByRef(bookingRef) {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/sync/get-booking.php?booking_ref=${encodeURIComponent(bookingRef)}`
+        );
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || "Failed to get booking from Production API");
+        }
+
+        return { success: true, data: data.data };
+      } catch (error) {
+        console.error("Holiday Taxis Get Booking API Error:", error);
         return { success: false, error: error.message };
       }
     },

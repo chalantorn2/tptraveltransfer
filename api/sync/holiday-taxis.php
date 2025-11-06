@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 require_once '../config/database.php';
 require_once '../config/holiday-taxis.php';
+require_once '../config/province-mapping.php';
 
 try {
     $db = new Database();
@@ -84,26 +85,56 @@ try {
         $checkStmt->execute([':ref' => $booking['ref']]);
         $exists = $checkStmt->fetch();
 
-        // Get detailed booking info if enabled
+        // Get detailed booking info if enabled (with retry)
         $detailData = null;
         if ($detailSync) {
-            $detailUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/{$booking['ref']}";
+            $maxRetries = 3;
+            for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+                $detailUrl = HolidayTaxisConfig::API_ENDPOINT . "/bookings/{$booking['ref']}";
 
-            $detailCh = curl_init();
-            curl_setopt_array($detailCh, [
-                CURLOPT_URL => $detailUrl,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 20
-            ]);
+                $detailCh = curl_init();
+                curl_setopt_array($detailCh, [
+                    CURLOPT_URL => $detailUrl,
+                    CURLOPT_HTTPHEADER => $headers,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 20,
+                    CURLOPT_CONNECTTIMEOUT => 10
+                ]);
 
-            $detailResponse = curl_exec($detailCh);
-            $detailHttpCode = curl_getinfo($detailCh, CURLINFO_HTTP_CODE);
-            curl_close($detailCh);
+                $detailResponse = curl_exec($detailCh);
+                $detailHttpCode = curl_getinfo($detailCh, CURLINFO_HTTP_CODE);
+                $curlError = curl_error($detailCh);
+                curl_close($detailCh);
 
-            if ($detailHttpCode === 200) {
-                $detailData = json_decode($detailResponse, true);
-                $totalDetailed++;
+                // Success
+                if ($detailHttpCode === 200 && !empty($detailResponse)) {
+                    $data = json_decode($detailResponse, true);
+                    if ($data !== null) {
+                        $detailData = $data;
+                        $totalDetailed++;
+                        if ($attempt > 1) {
+                            error_log("✓ Detail API SUCCESS for {$booking['ref']} on attempt $attempt/$maxRetries");
+                        }
+                        break;
+                    }
+                }
+
+                // Log failure
+                $errorMsg = "HTTP $detailHttpCode";
+                if (!empty($curlError)) {
+                    $errorMsg .= " | cURL Error: $curlError";
+                }
+                error_log("✗ Detail API FAILED for {$booking['ref']} (attempt $attempt/$maxRetries) - $errorMsg");
+
+                // Retry with exponential backoff
+                if ($attempt < $maxRetries) {
+                    $delay = $attempt * 500000; // 0.5s, 1s, 1.5s
+                    usleep($delay);
+                }
+            }
+
+            if ($detailData === null) {
+                error_log("✗✗✗ Detail API FINAL FAILURE for {$booking['ref']} after $maxRetries attempts");
             }
         }
 
@@ -120,26 +151,6 @@ try {
             $departureDate = $booking['departuredate'];
         }
 
-        // From detail data (more accurate)
-        if ($detailData && isset($detailData['booking'])) {
-            $bookingDetail = $detailData['booking'];
-
-            if (isset($bookingDetail['arrival']['arrivaldate'])) {
-                $arrivalDate = $bookingDetail['arrival']['arrivaldate'];
-            }
-            if (isset($bookingDetail['departure']['departuredate'])) {
-                $departureDate = $bookingDetail['departure']['departuredate'];
-            }
-            if (isset($bookingDetail['departure']['pickupdate'])) {
-                $pickupDate = $bookingDetail['departure']['pickupdate'];
-            }
-        }
-
-        // Determine pickup date if not set
-        if (!$pickupDate) {
-            $pickupDate = $departureDate ?: $arrivalDate;
-        }
-
         // Extract additional data from detail response
         $passengerEmail = null;
         $bookingType = null;
@@ -152,6 +163,20 @@ try {
         $resort = null;
         $flightNoArrival = null;
         $flightNoDeparture = null;
+        $adults = 1;
+        $children = 0;
+        $infants = 0;
+
+        // Initialize Quote-specific fields
+        $pickupAddress1 = null;
+        $pickupAddress2 = null;
+        $pickupAddress3 = null;
+        $pickupAddress4 = null;
+        $dropoffAddress1 = null;
+        $dropoffAddress2 = null;
+        $dropoffAddress3 = null;
+        $dropoffAddress4 = null;
+        $transferDate = null;
 
         if ($detailData && isset($detailData['booking']['general'])) {
             $general = $detailData['booking']['general'];
@@ -159,26 +184,79 @@ try {
             $airport = $general['airport'] ?? null;
             $airportCode = $general['airportcode'] ?? null;
             $resort = $general['resort'] ?? null;
+            $adults = intval($general['adults'] ?? 1);
+            $children = intval($general['children'] ?? 0);
+            $infants = intval($general['infants'] ?? 0);
         }
 
-        if ($detailData && isset($detailData['booking']['arrival'])) {
-            $arrival = $detailData['booking']['arrival'];
-            $accommodationName = $arrival['accommodationname'] ?? null;
-            $accommodationAddress1 = $arrival['accommodationaddress1'] ?? null;
-            $accommodationAddress2 = $arrival['accommodationaddress2'] ?? null;
-            $accommodationTel = $arrival['accommodationtel'] ?? null;
-            $flightNoArrival = $arrival['flightno'] ?? null;
-        }
+        // Calculate pax_total from adults + children + infants
+        $paxTotal = $adults + $children + $infants;
 
-        if ($detailData && isset($detailData['booking']['departure'])) {
-            $departure = $detailData['booking']['departure'];
-            $flightNoDeparture = $departure['flightno'] ?? null;
-            // Use departure accommodation if arrival not available
-            if (!$accommodationName) {
-                $accommodationName = $departure['accommodationname'] ?? null;
-                $accommodationAddress1 = $departure['accommodationaddress1'] ?? null;
-                $accommodationAddress2 = $departure['accommodationaddress2'] ?? null;
-                $accommodationTel = $departure['accommodationtel'] ?? null;
+        // Check if this is a Quote booking
+        $isQuoteBooking = ($bookingType === 'Quote');
+
+        // Process data based on booking type
+        if ($isQuoteBooking && $detailData && isset($detailData['booking']['quote'])) {
+            // Quote booking - use quote section
+            $quote = $detailData['booking']['quote'];
+            $transferDate = $quote['transferdate'] ?? null;
+            $pickupAddress1 = $quote['pickupaddress1'] ?? null;
+            $pickupAddress2 = $quote['pickupaddress2'] ?? null;
+            $pickupAddress3 = $quote['pickupaddress3'] ?? null;
+            $pickupAddress4 = $quote['pickupaddress4'] ?? null;
+            $dropoffAddress1 = $quote['dropoffaddress1'] ?? null;
+            $dropoffAddress2 = $quote['dropoffaddress2'] ?? null;
+            $dropoffAddress3 = $quote['dropoffaddress3'] ?? null;
+            $dropoffAddress4 = $quote['dropoffaddress4'] ?? null;
+
+            // For Quote: pickup_date = transfer_date, no arrival/departure dates
+            $pickupDate = $transferDate;
+            $arrivalDate = null;
+            $departureDate = null;
+            $airport = null;
+            $airportCode = null;
+            $resort = null;
+        } else {
+            // Airport booking - use arrival/departure sections
+            // From detail data (more accurate)
+            if ($detailData && isset($detailData['booking'])) {
+                $bookingDetail = $detailData['booking'];
+
+                if (isset($bookingDetail['arrival']['arrivaldate'])) {
+                    $arrivalDate = $bookingDetail['arrival']['arrivaldate'];
+                }
+                if (isset($bookingDetail['departure']['departuredate'])) {
+                    $departureDate = $bookingDetail['departure']['departuredate'];
+                }
+                if (isset($bookingDetail['departure']['pickupdate'])) {
+                    $pickupDate = $bookingDetail['departure']['pickupdate'];
+                }
+            }
+
+            // Determine pickup date if not set
+            if (!$pickupDate) {
+                $pickupDate = $departureDate ?: $arrivalDate;
+            }
+
+            if ($detailData && isset($detailData['booking']['arrival'])) {
+                $arrival = $detailData['booking']['arrival'];
+                $accommodationName = $arrival['accommodationname'] ?? null;
+                $accommodationAddress1 = $arrival['accommodationaddress1'] ?? null;
+                $accommodationAddress2 = $arrival['accommodationaddress2'] ?? null;
+                $accommodationTel = $arrival['accommodationtel'] ?? null;
+                $flightNoArrival = $arrival['flightno'] ?? null;
+            }
+
+            if ($detailData && isset($detailData['booking']['departure'])) {
+                $departure = $detailData['booking']['departure'];
+                $flightNoDeparture = $departure['flightno'] ?? null;
+                // Use departure accommodation if arrival not available
+                if (!$accommodationName) {
+                    $accommodationName = $departure['accommodationname'] ?? null;
+                    $accommodationAddress1 = $departure['accommodationaddress1'] ?? null;
+                    $accommodationAddress2 = $departure['accommodationaddress2'] ?? null;
+                    $accommodationTel = $departure['accommodationtel'] ?? null;
+                }
             }
         }
 
@@ -191,7 +269,7 @@ try {
 
         if ($exists) {
             // Update existing booking
-            $updateSql = "UPDATE bookings SET 
+            $updateSql = "UPDATE bookings SET
                             ht_status = :status,
                             passenger_name = :passenger_name,
                             passenger_phone = :passenger_phone,
@@ -210,6 +288,15 @@ try {
                             pickup_date = :pickup_date,
                             flight_no_arrival = :flight_no_arrival,
                             flight_no_departure = :flight_no_departure,
+                            pickup_address1 = :pickup_address1,
+                            pickup_address2 = :pickup_address2,
+                            pickup_address3 = :pickup_address3,
+                            pickup_address4 = :pickup_address4,
+                            dropoff_address1 = :dropoff_address1,
+                            dropoff_address2 = :dropoff_address2,
+                            dropoff_address3 = :dropoff_address3,
+                            dropoff_address4 = :dropoff_address4,
+                            transfer_date = :transfer_date,
                             last_action_date = :last_action_date,
                             raw_data = :raw_data,
                             synced_at = NOW(),
@@ -222,7 +309,7 @@ try {
                 ':status' => $booking['status'],
                 ':passenger_name' => $booking['passengername'] ?? null,
                 ':passenger_phone' => $booking['passengertelno'] ?? null,
-                ':pax_total' => 1,
+                ':pax_total' => $paxTotal,
                 ':booking_type' => $bookingType,
                 ':vehicle_type' => $booking['vehicle'] ?? null,
                 ':airport' => $airport,
@@ -237,6 +324,15 @@ try {
                 ':pickup_date' => $pickupDate,
                 ':flight_no_arrival' => $flightNoArrival,
                 ':flight_no_departure' => $flightNoDeparture,
+                ':pickup_address1' => $pickupAddress1,
+                ':pickup_address2' => $pickupAddress2,
+                ':pickup_address3' => $pickupAddress3,
+                ':pickup_address4' => $pickupAddress4,
+                ':dropoff_address1' => $dropoffAddress1,
+                ':dropoff_address2' => $dropoffAddress2,
+                ':dropoff_address3' => $dropoffAddress3,
+                ':dropoff_address4' => $dropoffAddress4,
+                ':transfer_date' => $transferDate,
                 ':last_action_date' => $booking['lastactiondate'] ?? date('Y-m-d H:i:s'),
                 ':raw_data' => json_encode($combinedRawData)
             ]);
@@ -268,14 +364,43 @@ try {
 
             $totalUpdated++;
         } else {
+            // Auto-detect province
+            if ($isQuoteBooking) {
+                // For Quote bookings - use pickup/dropoff addresses
+                $provinceData = ProvinceMapping::detectProvinceForQuote([
+                    'pickup_address1' => $pickupAddress1,
+                    'pickup_address2' => $pickupAddress2,
+                    'pickup_address3' => $pickupAddress3,
+                    'pickup_address4' => $pickupAddress4,
+                    'dropoff_address1' => $dropoffAddress1,
+                    'dropoff_address2' => $dropoffAddress2,
+                    'dropoff_address3' => $dropoffAddress3,
+                    'dropoff_address4' => $dropoffAddress4,
+                ]);
+            } else {
+                // For Airport bookings - use airport/accommodation
+                $provinceData = ProvinceMapping::detectProvince([
+                    'airport' => $airport,
+                    'airport_code' => $airportCode,
+                    'from_airport' => $fromAirport ?? null,
+                    'to_airport' => $toAirport ?? null,
+                    'accommodation_address1' => $accommodationAddress1,
+                    'accommodation_address2' => $accommodationAddress2
+                ]);
+            }
+
             // Insert new booking
             $insertSql = "INSERT INTO bookings (
                             booking_ref, ht_status, passenger_name, passenger_phone,
-                            pax_total, booking_type, vehicle_type, 
+                            pax_total, booking_type, vehicle_type,
                             airport, airport_code, resort,
                             accommodation_name, accommodation_address1, accommodation_address2, accommodation_tel,
                             arrival_date, departure_date, pickup_date,
                             flight_no_arrival, flight_no_departure,
+                            pickup_address1, pickup_address2, pickup_address3, pickup_address4,
+                            dropoff_address1, dropoff_address2, dropoff_address3, dropoff_address4,
+                            transfer_date,
+                            province, province_source, province_confidence,
                             last_action_date, raw_data, synced_at
                           ) VALUES (
                             :ref, :status, :passenger_name, :passenger_phone,
@@ -284,6 +409,10 @@ try {
                             :accommodation_name, :accommodation_address1, :accommodation_address2, :accommodation_tel,
                             :arrival_date, :departure_date, :pickup_date,
                             :flight_no_arrival, :flight_no_departure,
+                            :pickup_address1, :pickup_address2, :pickup_address3, :pickup_address4,
+                            :dropoff_address1, :dropoff_address2, :dropoff_address3, :dropoff_address4,
+                            :transfer_date,
+                            :province, :province_source, :province_confidence,
                             :last_action_date, :raw_data, NOW()
                           )";
 
@@ -293,7 +422,7 @@ try {
                 ':status' => $booking['status'],
                 ':passenger_name' => $booking['passengername'] ?? null,
                 ':passenger_phone' => $booking['passengertelno'] ?? null,
-                ':pax_total' => 1,
+                ':pax_total' => $paxTotal,
                 ':booking_type' => $bookingType,
                 ':vehicle_type' => $booking['vehicle'] ?? null,
                 ':airport' => $airport,
@@ -308,6 +437,18 @@ try {
                 ':pickup_date' => $pickupDate,
                 ':flight_no_arrival' => $flightNoArrival,
                 ':flight_no_departure' => $flightNoDeparture,
+                ':pickup_address1' => $pickupAddress1,
+                ':pickup_address2' => $pickupAddress2,
+                ':pickup_address3' => $pickupAddress3,
+                ':pickup_address4' => $pickupAddress4,
+                ':dropoff_address1' => $dropoffAddress1,
+                ':dropoff_address2' => $dropoffAddress2,
+                ':dropoff_address3' => $dropoffAddress3,
+                ':dropoff_address4' => $dropoffAddress4,
+                ':transfer_date' => $transferDate,
+                ':province' => $provinceData['province'],
+                ':province_source' => $provinceData['source'],
+                ':province_confidence' => $provinceData['confidence'],
                 ':last_action_date' => $booking['lastactiondate'] ?? date('Y-m-d H:i:s'),
                 ':raw_data' => json_encode($combinedRawData)
             ]);

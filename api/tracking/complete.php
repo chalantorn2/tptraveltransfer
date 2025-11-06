@@ -143,19 +143,43 @@ try {
     $completedAt = time();
     $durationMinutes = round(($completedAt - $startedAt) / 60);
 
-    // Update tracking token to completed
+    // Update tracking token to completed with completion_type
     $updateSql = "UPDATE driver_tracking_tokens
-                  SET status = 'completed', completed_at = NOW()
+                  SET status = 'completed',
+                      completed_at = NOW(),
+                      completion_type = :completion_type
                   WHERE token = :token";
     $updateStmt = $pdo->prepare($updateSql);
-    $updateStmt->execute([':token' => $token]);
+    $updateStmt->execute([
+        ':token' => $token,
+        ':completion_type' => $status
+    ]);
 
-    // Update assignment status
+    // Update assignment status with completion_type
     $updateAssignmentSql = "UPDATE driver_vehicle_assignments
-                           SET status = 'completed'
+                           SET status = 'completed',
+                               completed_at = NOW(),
+                               completion_type = :completion_type
                            WHERE id = :id";
     $updateAssignmentStmt = $pdo->prepare($updateAssignmentSql);
-    $updateAssignmentStmt->execute([':id' => $tokenData['assignment_id']]);
+    $updateAssignmentStmt->execute([
+        ':id' => $tokenData['assignment_id'],
+        ':completion_type' => $status
+    ]);
+
+    // Update bookings table - only set internal_status, NOT ht_status
+    // ht_status is reserved for Holiday Taxis API responses only
+    $updateBookingSql = "UPDATE bookings
+                         SET internal_status = 'completed'
+                         WHERE booking_ref = :booking_ref";
+
+    error_log("Updating booking {$tokenData['booking_ref']} with completion_type: $status (internal_status=completed)");
+
+    $updateBookingStmt = $pdo->prepare($updateBookingSql);
+    $updateBookingStmt->execute([':booking_ref' => $tokenData['booking_ref']]);
+
+    $rowsAffected = $updateBookingStmt->rowCount();
+    error_log("Booking update affected $rowsAffected rows");
 
     echo json_encode([
         'success' => true,
@@ -164,7 +188,9 @@ try {
             'completed_at' => date('Y-m-d H:i:s'),
             'total_duration_minutes' => $durationMinutes,
             'total_locations_sent' => (int)$tokenData['total_locations_sent'],
-            'final_status' => $status,
+            'completion_type' => $status,
+            'booking_ref' => $tokenData['booking_ref'],
+            'rows_updated' => $rowsAffected,
             'message' => 'Job completed successfully'
         ]
     ]);
